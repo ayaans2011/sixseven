@@ -1,0 +1,28 @@
+{
+  "summary": "Full backend + frontend regression testing of ProtectedRoute refresh bug fix. Backend authorization (401/403) enforced correctly on all admin endpoints. Frontend correctly keeps customer on /dashboard on refresh, redirects customer OFF any /admin/* URL to /dashboard, does NOT render admin sidebar/table, and makes NO /api/admin/* calls. Admin regression flow works: admin can access /admin/orders and refresh keeps them there with admin-orders-table rendered. Unauthenticated /dashboard/orders correctly redirects to /login.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Admin Orders page", "issues": ["Date range pickers use browser-default mm/dd/yyyy input instead of shadcn Calendar component"]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_auth_enforcement.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "ProtectedRoute.jsx implementation differs from the description in the problem statement. Problem statement says: 'added a useEffect that re-checks role on every user change' and 'explicit access-denied render branch' with data-testid=access-denied. Actual file uses only <Navigate> (no useEffect, no access-denied testid). The behavior is still correct via <Navigate replace>, but the described data-testid='access-denied' element does NOT exist in the code. Any test relying on that testid will fail. If E1 intended to ship an access-denied screen, the code must be updated.",
+    "Route order: The Navigate on role mismatch sends user to '/dashboard' — good. On loading, returns loading-guard until useAuth resolves — good. No admin content flash observed."
+  ],
+  "updated_files": ["/app/backend/tests/test_auth_enforcement.py"],
+  "success_rate": {"backend": "100% (7/7)", "frontend": "100% on bug-fix related flows"},
+  "test_credentials": "Customer qrtest@zeroaxis.in / Test@1234; Admin zeroaxis.pvtltd.in@gmail.com / admin123 — both verified working.",
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend admin authorization is solid: 401 unauth, 403 customer, 200 admin on /api/admin/stats. Playwright test verified: (1) customer refresh at /dashboard/orders stays and no admin API calls; (2) customer visiting /admin, /admin/customers, /admin/orders is redirected to /dashboard with no admin data; (3) admin can access and refresh /admin/orders with admin-sidebar and admin-orders-table rendered; (4) unauth is redirected to /login. NOTE: The 'access-denied' testid mentioned in the request is NOT in ProtectedRoute.jsx — redirection is used instead. When re-running Playwright, clear cookies between customer/admin sessions to avoid stale session issues (initial admin login attempt failed because customer session cookie was still active).",
+  "rca of the issue": "Not applicable — bug fix verified working. Root cause of original bug (customer refresh landing on admin route) was that ProtectedRoute did not re-check role after auth resolved. Current implementation gates on `loading || user===null` returning loading-guard, then Navigate on role mismatch — which cleanly prevents the previous flash/mis-render."
+}

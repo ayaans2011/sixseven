@@ -1,0 +1,9 @@
+crons:
+  - name: monthly-zx-report
+    description: "Emails admin a summary of orders, revenue and pending payments on the 1st of each month"
+    cron: "30 3 1 * *"
+    timezone: "Asia/Kolkata"
+    endpoint: "{{BASE_URL}}/api/cron/monthly-report"
+    method: POST
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    enabled: true

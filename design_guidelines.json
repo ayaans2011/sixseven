@@ -1,0 +1,133 @@
+{
+  "theme": "classic_business",
+  "philosophy": "Zeroaxis is an established technology business that focuses on doing the work properly. Not a flashy startup landing page. Simple, Professional, Trustworthy, Mature, Clean, Business-like.",
+  "typography": {
+    "primary_font": "Merriweather, serif",
+    "secondary_font": "'IBM Plex Sans', sans-serif",
+    "rules": {
+      "headings": "Merriweather. Keep letter-spacing normal to slightly tight. Avoid oversized headings. Max text-4xl or text-5xl on desktop hero.",
+      "body": "IBM Plex Sans. Highly readable. Use leading-relaxed for body text.",
+      "weights": "Use 400 and 700. Avoid thin or extreme black weights to keep a standard, document-like feel.",
+      "hierarchy": {
+        "h1": "text-3xl md:text-4xl font-bold text-[#0A1128]",
+        "h2": "text-2xl md:text-3xl font-bold text-[#0A1128]",
+        "h3": "text-xl md:text-2xl font-semibold text-[#0A1128]",
+        "body": "text-base text-gray-700 leading-relaxed",
+        "small": "text-sm text-gray-500"
+      }
+    }
+  },
+  "colors": {
+    "background": {
+      "primary": "#FFFFFF",
+      "secondary": "#F8F9FA"
+    },
+    "text": {
+      "primary": "#0A1128",
+      "secondary": "#4B5563",
+      "muted": "#6B7280"
+    },
+    "brand": {
+      "accent": "#00509E",
+      "accent_hover": "#003E7A"
+    },
+    "border": {
+      "default": "#E5E7EB",
+      "dark": "#D1D5DB"
+    },
+    "forbidden_colors": [
+      "#7351B7",
+      "#1B93A4",
+      "Neon colors",
+      "Excessive gradients"
+    ]
+  },
+  "visual_enhancers": {
+    "borders": "Solid 1px borders everywhere. Use border-[#E5E7EB].",
+    "radii": "Strictly rectangular or soft-rounded (max rounded-sm / 2px to 4px). NO pill shapes except maybe for small status badges.",
+    "shadows": "Very minimal. Use shadow-sm for cards. Avoid deep or colored shadows.",
+    "effects": "NO glassmorphism, NO neon effects, NO excessive gradients. Solid colors only."
+  },
+  "component_rules": {
+    "cards": "Traditional rectangular containers. White background, 1px gray border, rounded-sm, slight shadow-sm. Padding p-6.",
+    "buttons": "Standard solid rectangular buttons. bg-[#00509E] text-white rounded-sm px-6 py-2 hover:bg-[#003E7A]. No pills.",
+    "forms": "Traditional inputs. White background, 1px solid gray border, rounded-sm. Focus state should be a simple blue ring (ring-1 ring-[#00509E]).",
+    "tables": "Use simple, clean data tables for admin and dashboard. Avoid oversized visual cards for data. Left-aligned text, standard row heights.",
+    "navigation": "Classic solid background header. DO NOT use transparent backgrounds for header. Show links plainly. Logo left, links center, action right.",
+    "icons": "Use 'lucide-react'. Keep them small and functional. No oversized decorative icons."
+  },
+  "grids": {
+    "marketing": "Standard 12-column grid. Max-width containers (max-w-7xl). Symmetrical or simple 2-column (text on left, image on right) layouts. Padding py-16 or py-24 for sections.",
+    "admin": "Traditional layout: 250px fixed sidebar, flex-1 main content area. Topbar inside main content.",
+    "dashboard": "Use CSS Grid (grid-cols-1 md:grid-cols-2 lg:grid-cols-4) for top-level stats, then full-width rows for tables."
+  },
+  "layouts": {
+    "home_page": [
+      "Header (Solid White bg, Dark Text)",
+      "Hero (Traditional left-align text, right-align standard rectangular image)",
+      "Company Intro & About",
+      "Main Services (Simple grid of rectangular cards)",
+      "Why Zeroaxis & Experience (5 years)",
+      "Main Programmer - Ayaan (Profile section)",
+      "How ordering works & Tracking (Timeline view)",
+      "Udyam/MSME Registration Info (Placeholder text)",
+      "Enquiry CTA & Footer"
+    ],
+    "customer_dashboard": "Sidebar/TopNav hybrid. Sections: Overview, My Enquiries, My Orders, Tracking (vertical timeline), Notifications, Profile.",
+    "admin_dashboard": "Classic control-panel. Left Sidebar (Dashboard, Customers, Enquiries, Orders, Payments, Services, Notifications, Messages, Invoices, Content, Reports, Audit, Settings). Table-heavy content views."
+  },
+  "motion": {
+    "strategy": "Almost none. Professional and static.",
+    "allowed": "Subtle button hover (color darken), very small fade-in for page load. Smooth page transitions.",
+    "forbidden": "NO moving backgrounds, NO parallax, NO animated gradients, NO flashy transitions, NO bouncy physics."
+  },
+  "accessibility": {
+    "contrast": "Strict WCAG AA minimum. High contrast text on backgrounds.",
+    "focus": "Clear focus rings on all interactive elements.",
+    "testing": "All interactive elements MUST include a `data-testid` attribute."
+  },
+  "image_urls": {
+    "hero_office": {
+      "url": "https://images.pexels.com/photos/12903168/pexels-photo-12903168.jpeg",
+      "description": "Professional team collaborating in a well-lit corporate office. Use for Hero or About Us."
+    },
+    "programmer_ayaan": {
+      "url": "https://images.unsplash.com/photo-1522071820081-009f0129c71c",
+      "description": "Focused software developer team. Use for Main Programmer (Ayaan) or Experience section."
+    },
+    "technology_services": {
+      "url": "https://images.unsplash.com/photo-1785682231847-93265d8e633d",
+      "description": "Server rack filled with network and electronic equipment. Use for Services or IT background context."
+    }
+  },
+  "responsive": {
+    "breakpoint": "Mobile-first approach.",
+    "layout": "Stack columns vertically on mobile. Admin sidebar should become an off-canvas menu behind a hamburger icon on mobile.",
+    "typography": "Scale headings down on mobile (h1 to text-2xl/3xl, body remains text-base).",
+    "overflow_guard": "Ensure tables have 'overflow-x-auto' wrappers to prevent breaking the layout on mobile.",
+    "tap_targets": "Buttons and links must be at least 44x44px for touch capability."
+  },
+  "instructions_to_main_agent": [
+    "Build a classic, established corporate website using React, Tailwind CSS, and Shadcn UI.",
+    "Do NOT make it look like a modern flashy SaaS. It must look mature, trustworthy, and business-like.",
+    "Use Merriweather for headings and IBM Plex Sans for body text. Install these via Google Fonts.",
+    "Use solid white or light gray backgrounds. No glassmorphism or gradients.",
+    "Use purely rectangular or slightly rounded (rounded-sm) elements. Avoid rounded-full or pill shapes.",
+    "For the Admin Dashboard, use a classic sidebar control-panel layout with standard data tables instead of large modern cards.",
+    "Implement clear navigation visible on desktop without a hamburger menu (except for admin/dashboard sidebar).",
+    "Do not center-align body text. Keep text left-aligned for readability.",
+    "Ensure all interactive elements have 'data-testid' attributes.",
+    "Make the application strictly mobile-responsive. Stack grids on small screens and use overflow containers for tables.",
+    "Use the provided image URLs to substitute placeholders."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "Create distinctive, non-generic frontend layouts that respect the exact business requirements.",
+    "DO NOT use dark colors as gradients. Stick to solid colors.",
+    "DO NOT apply universal transitions (e.g., transition: all). Target specific properties.",
+    "DO NOT center align the app container. Respect natural reading flows.",
+    "NEVER use AI assistant emojis. Use lucide-react icons.",
+    "Prioritize Shadcn UI components but heavily customize their classes to remove the 'default' modern SaaS look (make borders 1px solid, reduce border radius to sm, remove heavy shadows).",
+    "Use 'sonner' for toast notifications.",
+    "Ensure standard semantic HTML structure (header, main, section, footer)."
+  ]
+}
