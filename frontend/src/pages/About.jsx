@@ -19,7 +19,7 @@ export default function AboutPage() {
           <ul className="mt-3 text-sm text-[#0A1128] space-y-1.5">
             <li><span className="text-[#6B7280] w-32 inline-block">Established:</span> {about.established || "2020"}</li>
             <li><span className="text-[#6B7280] w-32 inline-block">Experience:</span> {about.experience_years || "5"} years</li>
-            <li><span className="text-[#6B7280] w-32 inline-block">Main Programmer:</span> {programmer.name || "Ayaan"}</li>
+            <li><span className="text-[#6B7280] w-32 inline-block">Main Programmer:</span> {programmer.name || "Zeroaxis Team"}</li>
           </ul>
         </div>
       </div>
