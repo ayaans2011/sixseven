@@ -49,7 +49,7 @@ export default function Home() {
             <div className="mt-8 grid grid-cols-3 gap-4 text-sm">
               <div><div className="font-serif text-2xl font-bold text-[#0A1128]">{about.experience_years || "5"}+</div><div className="text-[#6B7280]">Years of experience</div></div>
               <div><div className="font-serif text-2xl font-bold text-[#0A1128]">{about.established || "2020"}</div><div className="text-[#6B7280]">Established</div></div>
-              <div><div className="font-serif text-2xl font-bold text-[#0A1128]">100%</div><div className="text-[#6B7280]">Delivered by Ayaan</div></div>
+              <div><div className="font-serif text-2xl font-bold text-[#0A1128]">100%</div><div className="text-[#6B7280]">Delivered by Zeroaxis Team</div></div>
             </div>
           </div>
           <div className="border border-[#E5E7EB] p-1 bg-white">
@@ -167,7 +167,7 @@ export default function Home() {
               <li><span className="text-[#6B7280] w-24 inline-block">Company:</span> ZEROAXIS</li>
               <li><span className="text-[#6B7280] w-24 inline-block">Established:</span> {about.established || "2020"}</li>
               <li><span className="text-[#6B7280] w-24 inline-block">Experience:</span> {about.experience_years || "5"} years</li>
-              <li><span className="text-[#6B7280] w-24 inline-block">Programmer:</span> {programmer.name || "Ayaan"}</li>
+              <li><span className="text-[#6B7280] w-24 inline-block">Programmer:</span> {programmer.name || "Zeroaxis Team"}</li>
             </ul>
           </div>
         </div>
@@ -186,8 +186,8 @@ export default function Home() {
           </div>
           <div className="text-sm text-[#CBD2DA]">
             <div className="font-serif text-white text-lg mb-2">Contact</div>
-            <div><span className="text-[#94A3B8]">Email:</span> {contact.email || "[YOUR EMAIL]"}</div>
-            <div><span className="text-[#94A3B8]">Phone:</span> {contact.phone || "[YOUR PHONE]"}</div>
+            <div><span className="text-[#94A3B8]">Email:</span> {contact.email || "ayaanss2011@gmail.com"}</div>
+            <div><span className="text-[#94A3B8]">Phone:</span> {contact.phone || "+91 8590908959"}</div>
             <div><span className="text-[#94A3B8]">Hours:</span> {contact.hours}</div>
           </div>
         </div>
