@@ -120,7 +120,7 @@ export default function Home() {
           <div className="border border-[#E5E7EB] p-1 md:col-span-1"><img src={AYAAN_IMG} alt="Ayaan" className="w-full h-64 object-cover" loading="lazy" /></div>
           <div className="md:col-span-2">
             <div className="text-xs font-semibold uppercase tracking-widest text-[#00509E]">{programmer.title || "Main Programmer"}</div>
-            <h2 className="font-serif text-2xl md:text-3xl font-bold text-[#0A1128] mt-1">{programmer.name || "Ayaan"}</h2>
+            <h2 className="font-serif text-2xl md:text-3xl font-bold text-[#0A1128] mt-1">{programmer.name || "Team Zeroaxis"}</h2>
             <p className="text-[#4B5563] mt-3 leading-relaxed">{programmer.bio}</p>
           </div>
         </div>
