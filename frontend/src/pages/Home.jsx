@@ -157,7 +157,7 @@ export default function Home() {
             <p className="text-[#4B5563] mt-2 leading-relaxed">
               {udyam.registered
                 ? `Registered under Udyam. Number: ${udyam.number}`
-                : "Zeroaxis will publish its official Udyam/MSME registration details on this page once the registration is verified."}
+                : "UDYAM-KL-12-0143574"}
             </p>
             <p className="text-[#6B7280] text-xs mt-2">Placeholder: {udyam.number}</p>
           </div>
