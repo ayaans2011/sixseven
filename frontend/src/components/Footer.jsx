@@ -7,7 +7,7 @@ export default function Footer() {
         <div>
           <div className="font-serif text-xl font-bold text-white">ZEROAXIS</div>
           <p className="text-xs mt-2 text-[#94A3B8]">Technology &amp; Digital Services. Established 2020.</p>
-          <p className="text-xs mt-2 text-[#94A3B8]">Main Programmer: Ayaan</p>
+          <p className="text-xs mt-2 text-[#94A3B8]">Main Programmers: Team Zeroaxis </p>
         </div>
         <div>
           <div className="text-white text-sm font-semibold mb-2">Company</div>
@@ -28,14 +28,14 @@ export default function Footer() {
         <div>
           <div className="text-white text-sm font-semibold mb-2">Legal</div>
           <ul className="space-y-1 text-sm">
-            <li>Udyam / MSME: <span className="text-[#94A3B8]">Registration details will be published once verified.</span></li>
+            <li>Udyam / MSME: <span className="text-[#94A3B8]">UDYAM-KL-12-0143574</span></li>
           </ul>
         </div>
       </div>
       <div className="border-t border-[#1E2A44]">
         <div className="container-page py-4 text-xs text-[#94A3B8] flex flex-col md:flex-row justify-between gap-2">
-          <span>© {new Date().getFullYear()} Zeroaxis. All rights reserved.</span>
-          <span>Built and maintained by Ayaan.</span>
+          <span>© {new Date().getFullYear()} Zeroaxis.2025 All rights reserved.</span>
+          <span>Built and maintained by Zeroaxis.</span>
         </div>
       </div>
     </footer>
