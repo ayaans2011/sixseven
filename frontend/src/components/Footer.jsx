@@ -7,7 +7,7 @@ export default function Footer() {
         <div>
           <div className="font-serif text-xl font-bold text-white">ZEROAXIS</div>
           <p className="text-xs mt-2 text-[#94A3B8]">Technology &amp; Digital Services. Established 2020.</p>
-          <p className="text-xs mt-2 text-[#94A3B8]">Main Programmers: Team Zeroaxis </p>
+          <p className="text-xs mt-2 text-[#94A3B8]">Main Programmers: Team Zeroaxis</p>
         </div>
         <div>
           <div className="text-white text-sm font-semibold mb-2">Company</div>
