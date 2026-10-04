@@ -140,3 +140,24 @@ PAYMENT_STATUSES = [
     "PAYMENT_REJECTED",
     "REFUNDED",
 ]
+
+
+# ---------- Support Tickets ----------
+class SupportTicketIn(BaseModel):
+    subject: str = Field(min_length=3, max_length=160)
+    message: str = Field(min_length=1, max_length=5000)
+    priority: Optional[str] = "normal"
+
+
+class SupportTicketReplyIn(BaseModel):
+    message: str = Field(min_length=1, max_length=5000)
+
+
+class SupportTicketUpdateIn(BaseModel):
+    status: Optional[str] = None
+    priority: Optional[str] = None
+    reply: Optional[str] = None
+
+
+SUPPORT_TICKET_STATUSES = ["open", "in_progress", "waiting_customer", "resolved", "closed"]
+SUPPORT_TICKET_PRIORITIES = ["low", "normal", "high", "urgent"]
