@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from database import get_db, ensure_indexes, close_db
 from security import hash_password, verify_password
 from routes.auth import router as auth_router
+from routes.admin_auth import router as admin_auth_router
 from routes.services import router as services_router
 from routes.enquiries import router as enquiries_router
 from routes.orders import router as orders_router
@@ -36,6 +37,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(admin_auth_router)
 app.include_router(services_router)
 app.include_router(enquiries_router)
 app.include_router(orders_router)
@@ -70,7 +72,6 @@ async def _seed_admin(email: str, password: str, name: str):
         })
         logger.info(f"Seeded admin: {email}")
     else:
-        # Refresh admin password if changed and ensure role
         updates = {}
         if not verify_password(password, existing["password_hash"]):
             updates["password_hash"] = hash_password(password)
@@ -84,51 +85,17 @@ async def _seed_admin(email: str, password: str, name: str):
 async def _seed_default_content():
     db = get_db()
     defaults = {
-        "hero": {
-            "tagline": "Established Technology & Digital Services",
-            "headline": "Reliable technology work, delivered the traditional way.",
-            "subtext": "Zeroaxis provides technology and digital services with a focus on quality, accountability and long-term reliability.",
-        },
-        "about": {
-            "title": "About Zeroaxis",
-            "body": "Zeroaxis is a technology and digital services company. We work with clients to deliver software, digital solutions and technical support. Our approach is straightforward: understand the requirement, do the work properly, and deliver on schedule.",
-            "experience_years": "5",
-            "established": "2020",
-        },
-        "programmer": {
-            "name": "Ayaan",
-            "title": "Main Programmer",
-            "bio": "Ayaan leads the technical work at Zeroaxis and is responsible for the majority of the programming and delivery. He brings hands-on experience across software development and technical problem-solving.",
-        },
-        "udyam": {
-            "registered": False,
-            "number": "[UDYAM-XX-XX-XXXXXXX]",
-            "note": "Official Udyam/MSME registration details will be displayed here once verified.",
-        },
-        "contact": {
-            "email": "[YOUR EMAIL]",
-            "phone": "[YOUR PHONE]",
-            "address": "[YOUR ADDRESS]",
-            "hours": "Monday – Saturday, 10:00 – 19:00",
-        },
-        "why": {
-            "points": [
-                "5+ years of practical technology experience",
-                "Direct communication with the person doing the work",
-                "Transparent order tracking and payment verification",
-                "Straightforward pricing and clear timelines",
-                "Accountable end-to-end delivery",
-            ]
-        },
+        "hero": {"tagline": "Established Technology & Digital Services","headline": "Reliable technology work, delivered the traditional way.","subtext": "Zeroaxis provides technology and digital services with a focus on quality, accountability and long-term reliability."},
+        "about": {"title": "About Zeroaxis","body": "Zeroaxis is a technology and digital services company. We work with clients to deliver software, digital solutions and technical support. Our approach is straightforward: understand the requirement, do the work properly, and deliver on schedule.","experience_years": "5","established": "2020"},
+        "programmer": {"name": "Ayaan","title": "Main Programmer","bio": "Ayaan leads the technical work at Zeroaxis and is responsible for the majority of the programming and delivery. He brings hands-on experience across software development and technical problem-solving."},
+        "udyam": {"registered": False,"number": "[UDYAM-XX-XX-XXXXXXX]","note": "Official Udyam/MSME registration details will be displayed here once verified."},
+        "contact": {"email": "[YOUR EMAIL]","phone": "[YOUR PHONE]","address": "[YOUR ADDRESS]","hours": "Monday – Saturday, 10:00 – 19:00"},
+        "why": {"points": ["5+ years of practical technology experience","Direct communication with the person doing the work","Transparent order tracking and payment verification","Straightforward pricing and clear timelines","Accountable end-to-end delivery"]},
         "announcement": {"text": "", "active": False},
     }
     for key, value in defaults.items():
-        existing = await db.content.find_one({"key": key})
-        if not existing:
-            await db.content.insert_one({
-                "key": key, "value": value,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            })
+        if not await db.content.find_one({"key": key}):
+            await db.content.insert_one({"key": key, "value": value, "updated_at": datetime.now(timezone.utc).isoformat()})
 
 
 async def _seed_default_services():
@@ -136,24 +103,12 @@ async def _seed_default_services():
     if await db.services.count_documents({}) > 0:
         return
     items = [
-        {"name": "Website Development", "slug": "website-development",
-         "description": "Custom websites — corporate, portfolio, informational sites with clean design and reliable hosting guidance.",
-         "price": 12000, "category": "Web", "active": True},
-        {"name": "Web Application Development", "slug": "web-application",
-         "description": "Full-stack web applications with authentication, database, admin panel and role-based access.",
-         "price": 35000, "category": "Web", "active": True},
-        {"name": "Mobile-Friendly Landing Page", "slug": "landing-page",
-         "description": "Single-page marketing website with contact form and mobile responsive design.",
-         "price": 5000, "category": "Web", "active": True},
-        {"name": "Bug Fixing & Maintenance", "slug": "bug-fix",
-         "description": "Fix bugs, patch issues and maintain existing websites or applications on a per-task basis.",
-         "price": 2500, "category": "Support", "active": True},
-        {"name": "Custom Software / Automation", "slug": "custom-software",
-         "description": "Automation scripts, custom tools and internal software tailored to specific business needs.",
-         "price": 20000, "category": "Software", "active": True},
-        {"name": "Technical Consulting", "slug": "consulting",
-         "description": "Advisory sessions on architecture, stack selection, security or project planning.",
-         "price": 3000, "category": "Advisory", "active": True},
+        {"name": "Website Development", "slug": "website-development","description": "Custom websites — corporate, portfolio, informational sites with clean design and reliable hosting guidance.","price": 12000, "category": "Web", "active": True},
+        {"name": "Web Application Development", "slug": "web-application","description": "Full-stack web applications with authentication, database, admin panel and role-based access.","price": 35000, "category": "Web", "active": True},
+        {"name": "Mobile-Friendly Landing Page", "slug": "landing-page","description": "Single-page marketing website with contact form and mobile responsive design.","price": 5000, "category": "Web", "active": True},
+        {"name": "Bug Fixing & Maintenance", "slug": "bug-fix","description": "Fix bugs, patch issues and maintain existing websites or applications on a per-task basis.","price": 2500, "category": "Support", "active": True},
+        {"name": "Custom Software / Automation", "slug": "custom-software","description": "Automation scripts, custom tools and internal software tailored to specific business needs.","price": 20000, "category": "Software", "active": True},
+        {"name": "Technical Consulting", "slug": "consulting","description": "Advisory sessions on architecture, stack selection, security or project planning.","price": 3000, "category": "Advisory", "active": True},
     ]
     now = datetime.now(timezone.utc).isoformat()
     for it in items:
@@ -164,7 +119,6 @@ async def _seed_default_services():
 @app.on_event("startup")
 async def startup():
     await ensure_indexes()
-    # Initialize object storage best-effort (files feature)
     try:
         from routes.files import init_storage
         key = init_storage()
@@ -174,11 +128,7 @@ async def startup():
             logger.warning("Object storage not initialized — file uploads will 503 until fixed")
     except Exception as e:
         logger.error(f"Storage init error: {e}")
-    await _seed_admin(
-        os.environ.get("ADMIN_EMAIL", "admin@zeroaxis.in"),
-        os.environ.get("ADMIN_PASSWORD", "admin123"),
-        "Zeroaxis Admin",
-    )
+    await _seed_admin(os.environ.get("ADMIN_EMAIL", "admin@zeroaxis.in"), os.environ.get("ADMIN_PASSWORD", "admin123"), "Zeroaxis Admin")
     owner_email = os.environ.get("OWNER_EMAIL")
     owner_password = os.environ.get("OWNER_PASSWORD")
     if owner_email and owner_password:
