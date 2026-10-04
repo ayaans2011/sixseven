@@ -13,13 +13,12 @@ import Register from "@/pages/Register";
 import ForgotPassword from "@/pages/ForgotPassword";
 import ResetPassword from "@/pages/ResetPassword";
 import ActivateAccount from "@/pages/ActivateAccount";
+import AdminLogin from "@/pages/AdminLogin";
 import CustomerDashboard from "@/pages/CustomerDashboard";
 import AdminDashboard from "@/pages/AdminDashboard";
 import "@/App.css";
 
-function OrdersRedirect() {
-  return <Navigate to="/dashboard/orders" replace />;
-}
+function OrdersRedirect() { return <Navigate to="/dashboard/orders" replace />; }
 
 function EntryRoute() {
   const [params] = useSearchParams();
@@ -43,6 +42,7 @@ export default function App() {
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/activate-account" element={<ActivateAccount />} />
+          <Route path="/admin-login" element={<AdminLogin />} />
           <Route path="/orders" element={<ProtectedRoute><OrdersRedirect /></ProtectedRoute>} />
           <Route path="/dashboard/*" element={<ProtectedRoute><CustomerDashboard /></ProtectedRoute>} />
           <Route path="/admin/*" element={<ProtectedRoute role="admin"><AdminDashboard /></ProtectedRoute>} />
