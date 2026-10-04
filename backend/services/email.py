@@ -267,13 +267,14 @@ def payment_verified(*, to_email: str, name: str, order_number: str, amount: flo
     _bg_send(to=to_email, subject=subject, html=_wrap(inner))
 
 
-def password_reset(*, to_email: str, name: str, reset_token: str):
+def password_reset(*, to_email: str, name: str, reset_token: str, otp: str):
     subject = "Reset your ZEROAXIS password"
     reset_url = _app_url(f"/?reset_token={reset_token}")
     inner = (
         f'<p>Hi {escape(name or "there")},</p>'
         f'<p>We received a request to reset the password for your ZEROAXIS account.</p>'
-        f'<p>This link is valid for <b>30 minutes</b> and can only be used once.</p>'
+        f'<p>This link and verification code are valid for <b>30 minutes</b> and can only be used once.</p>'
+        f'<p style="font-size:22px;letter-spacing:5px;font-weight:700"><b>{escape(otp)}</b></p>'
         f'{_button(reset_url, "Reset your password") if reset_url else ""}'
         f'<p style="font-size:12px;color:#6B7280;margin-top:16px">'
         f'If you did not request this, you can safely ignore this email.</p>'
@@ -322,5 +323,17 @@ def status_changed(*, to_email: str, name: str, order_number: str, new_status: s
         f'<p>Hi {escape(name or "there")},</p>'
         f'<p>Order <b>{escape(order_number)}</b> is now <b>{escape(label)}</b>.</p>'
         f'{f"<p>{escape(note)}</p>" if note else ""}'
+    )
+    _bg_send(to=to_email, subject=subject, html=_wrap(inner))
+
+
+def registration_otp(*, to_email: str, name: str, otp: str):
+    subject = "Verify your ZEROAXIS email"
+    inner = (
+        f'<p>Hi {escape(name or "there")},</p>'
+        f'<p>Use the verification code below to complete your ZEROAXIS registration.</p>'
+        f'<p style="font-size:22px;letter-spacing:5px;font-weight:700"><b>{escape(otp)}</b></p>'
+        f'<p>This code is valid for <b>10 minutes</b> and can only be used once.</p>'
+        f'<p style="font-size:12px;color:#6B7280">If you did not request an account, you can safely ignore this email.</p>'
     )
     _bg_send(to=to_email, subject=subject, html=_wrap(inner))
