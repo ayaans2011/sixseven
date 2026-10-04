@@ -14,6 +14,8 @@ export default function AdminLogin() {
   const submitPassword = async (e) => {
     e.preventDefault(); setBusy(true); setError("");
     try {
+      // Do not let a previous customer bearer token interfere with admin authentication.
+      localStorage.removeItem("zx_token");
       const { data } = await api.post("/admin-auth/login", form);
       setChallenge(data.challenge);
       if (data.two_factor_setup_required) {
@@ -33,12 +35,18 @@ export default function AdminLogin() {
     try {
       const endpoint = step === "setup" ? "/admin-auth/setup" : "/admin-auth/verify";
       const { data } = await api.post(endpoint, { challenge, code });
-      if (data.role === "admin") {
+      if (data.role === "admin" && data.access_token) {
+        // Keep the existing bearer fallback in sync with the admin session.
+        // This also handles browsers that do not persist the cross-origin cookie.
+        localStorage.setItem("zx_token", data.access_token);
+        const me = await api.get("/auth/me");
+        if (me.data?.role !== "admin") {
+          throw new Error("Admin session verification failed");
+        }
         toast.success("Admin signed in");
-        // Reload the protected route so AuthProvider reads the newly-issued
-        // HttpOnly session cookie from the server instead of relying on a
-        // client-side state handoff.
         window.location.replace("/admin");
+      } else {
+        throw new Error("Admin session was not created");
       }
     } catch (e) {
       setError(e.response?.data?.detail || "Invalid authenticator code");
