@@ -43,6 +43,7 @@ export default function App() {
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/activate-account" element={<ActivateAccount />} />
           <Route path="/admin-login" element={<AdminLogin />} />
+          <Route path="/admin-login.html" element={<AdminLogin />} />
           <Route path="/orders" element={<ProtectedRoute><OrdersRedirect /></ProtectedRoute>} />
           <Route path="/dashboard/*" element={<ProtectedRoute><CustomerDashboard /></ProtectedRoute>} />
           <Route path="/admin/*" element={<ProtectedRoute role="admin"><AdminDashboard /></ProtectedRoute>} />
