@@ -176,7 +176,6 @@ async def admin_update_ticket(ticket_id: str, data: SupportTicketUpdateIn, admin
         if data.priority is not None: parts.append(f"priority: {data.priority}")
         await notify_user(t.get("customer_id"), "Support ticket changed", f"Ticket {t.get('ticket_number')} was updated ({', '.join(parts)}).")
         if t.get("customer_email"):
-            await_email_status = True
             email_svc.support_ticket_status_changed(
                 to_email=t["customer_email"], name=t.get("customer_name", ""),
                 ticket_number=t["ticket_number"], status=data.status or t.get("status", ""),
