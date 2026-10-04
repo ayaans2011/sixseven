@@ -390,6 +390,28 @@ function Profile() {
         <div className="text-sm text-[#6B7280]">Email: {user?.email} (cannot be changed)</div>
         <button disabled={busy} className="zx-btn-primary" data-testid="profile-save-btn">{busy?"Saving…":"Save"}</button>
       </form>
+
+      <div className="zx-card mt-6 max-w-lg border-[#D1D5DB]">
+        <div className="font-semibold text-[#0A1128]">Delete account</div>
+        <p className="text-sm text-[#6B7280] mt-1">Permanently delete your customer login and account. Your existing orders and enquiries may remain as business records.</p>
+        <button
+          type="button"
+          className="mt-4 border border-[#A11B1B] text-[#A11B1B] px-4 py-2 text-sm hover:bg-[#FEF2F2]"
+          data-testid="delete-account-btn"
+          onClick={async () => {
+            if (!window.confirm("Delete your customer account permanently? You will be logged out and will need to create a new account to use customer login again.")) return;
+            if (!window.confirm("This cannot be undone. Continue deleting your account?")) return;
+            try {
+              await api.delete("/users/me");
+              localStorage.removeItem("zx_token");
+              toast.success("Your account has been deleted");
+              setTimeout(() => { window.location.href = "/"; }, 500);
+            } catch (e) {
+              toast.error(formatApiErrorDetail(e.response?.data?.detail));
+            }
+          }}
+        >Delete My Account</button>
+      </div>
     </div>
   );
 }
