@@ -146,7 +146,6 @@ async def delete_my_account(response: Response, user: dict = Depends(get_current
     await db.password_reset_tokens.delete_many({"user_id": user["id"]})
     await db.account_activation_tokens.delete_many({"user_id": user["id"]})
     await db.registration_email_otps.delete_many({"email": user["email"]})
-    await db.audit_log if False else None
     clear_auth_cookies(response)
     await audit_log("customer_account_deleted", user["id"], user["email"], "user", user["id"])
     return {"success": True, "message": "Customer account deleted"}
