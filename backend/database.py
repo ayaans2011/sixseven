@@ -46,3 +46,6 @@ async def ensure_indexes():
     await db.audit_logs.create_index("timestamp")
     await db.content.create_index("key", unique=True)
     await db.counters.create_index("name", unique=True)
+    await db.support_tickets.create_index("ticket_number", unique=True)
+    await db.support_tickets.create_index("customer_id")
+    await db.support_tickets.create_index([("status", 1), ("updated_at", -1)])
