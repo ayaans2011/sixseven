@@ -267,6 +267,20 @@ def payment_verified(*, to_email: str, name: str, order_number: str, amount: flo
     _bg_send(to=to_email, subject=subject, html=_wrap(inner))
 
 
+def password_reset(*, to_email: str, name: str, reset_token: str):
+    subject = "Reset your ZEROAXIS password"
+    reset_url = _app_url(f"/reset-password?token={reset_token}")
+    inner = (
+        f'<p>Hi {escape(name or "there")},</p>'
+        f'<p>We received a request to reset the password for your ZEROAXIS account.</p>'
+        f'<p>This link is valid for <b>30 minutes</b> and can only be used once.</p>'
+        f'{_button(reset_url, "Reset your password") if reset_url else ""}'
+        f'<p style="font-size:12px;color:#6B7280;margin-top:16px">'
+        f'If you did not request this, you can safely ignore this email.</p>'
+    )
+    _bg_send(to=to_email, subject=subject, html=_wrap(inner))
+
+
 def payment_rejected(*, to_email: str, name: str, order_number: str, note: str):
     subject = f"Payment rejected — {order_number}"
     inner = (
