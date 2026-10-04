@@ -195,7 +195,11 @@ async def submit_payment(oid: str, data: PaymentSubmitIn, user=Depends(get_curre
     }})
     await _add_status_history(db, oid, prev_ord, "PAYMENT_SUBMITTED", user["id"], user["email"], f"Payment via {data.method}, ref {data.reference}")
     await notify_user(user["id"], "Payment submitted", f"Payment for order {o['order_number']} was submitted and is awaiting verification.", now=now)
-    await notify_admins("Payment awaiting verification", f"Payment submitted for order {o['order_number']} by {user.get('name') or user['email']}. Reference: {data.reference}.", now=now)
+    admin_msg = f"Payment submitted for order {o['order_number']} by {user.get('name') or user['email']}. Reference: {data.reference}."
+    await notify_admins("Payment awaiting verification", admin_msg, now=now)
+    admins = await db.users.find({"role": "admin", "disabled": {"$ne": True}}, {"email": 1}).to_list(1000)
+    for a in admins:
+        if a.get("email"): email_svc.admin_event(to_email=a["email"], event_title="Payment awaiting verification", message=admin_msg)
     await audit_log("payment_submitted", user["id"], user["email"], "order", oid, {"prev": prev_pay})
     email_svc.payment_submitted(
         to_email=user["email"], name=user.get("name", ""),
