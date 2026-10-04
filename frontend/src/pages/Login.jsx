@@ -35,6 +35,7 @@ export default function LoginPage() {
           <div><label className="zx-label">Password</label><input required type="password" data-testid="login-password" className="zx-input" value={form.password} onChange={e=>setForm({...form, password: e.target.value})} /></div>
           {err && <div className="text-[#A11B1B] text-sm" data-testid="login-error">{err}</div>}
           <button disabled={busy} className="zx-btn-primary w-full justify-center" data-testid="login-submit-btn">{busy ? "Signing in…" : "Sign in"}</button>
+          <div className="text-sm"><Link to="/forgot-password" className="zx-link">Forgot password?</Link></div>
           <div className="text-sm text-[#4B5563]">No account? <Link to="/register" className="zx-link">Register</Link></div>
         </form>
       </div>
