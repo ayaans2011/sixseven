@@ -41,7 +41,7 @@ async def _issue_admin_session(response: Response, user: dict):
     refresh = create_refresh_token(uid)
     set_auth_cookies(response, access, refresh)
     await audit_log("admin_2fa_login", uid, email, "user", uid)
-    return {"id": uid, "email": email, "name": user.get("name", ""), "role": "admin", "two_factor_enabled": True}
+    return {"id": uid, "email": email, "name": user.get("name", ""), "role": "admin", "two_factor_enabled": True, "access_token": access}
 
 
 @router.post("/login")
