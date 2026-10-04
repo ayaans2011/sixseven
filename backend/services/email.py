@@ -346,3 +346,25 @@ def registration_otp(*, to_email: str, name: str, otp: str):
         f'<p style="font-size:12px;color:#6B7280">If you did not request an account, you can safely ignore this email.</p>'
     )
     _bg_send(to=to_email, subject=subject, html=_wrap(inner))
+
+
+def support_ticket_created(*, to_email: str, name: str, ticket_number: str, subject: str, priority: str):
+    subject_line = f"Support ticket received — {ticket_number}"
+    inner = (
+        f'<p>Hi {escape(name or "there")},</p>'
+        f'<p>We received your support ticket <b>{escape(ticket_number)}</b>. '
+        f'Our team will review it and respond.</p>'
+        f'<p><b>Subject:</b> {escape(subject)}<br><b>Priority:</b> {escape(priority.title())}</p>'
+    )
+    _bg_send(to=to_email, subject=subject_line, html=_wrap(inner))
+
+
+def support_ticket_reply(*, to_email: str, name: str, ticket_number: str, message: str):
+    subject_line = f"Support ticket update — {ticket_number}"
+    inner = (
+        f'<p>Hi {escape(name or "there")},</p>'
+        f'<p>ZEROAXIS Support has replied to your ticket <b>{escape(ticket_number)}</b>:</p>'
+        f'<blockquote style="border-left:3px solid #00509E;margin:12px 0;padding:8px 14px;background:#f8f9fa;font-size:13px;color:#0A1128">{escape(message)}</blockquote>'
+        f'<p>Please sign in to your dashboard if you need to reply.</p>'
+    )
+    _bg_send(to=to_email, subject=subject_line, html=_wrap(inner))
