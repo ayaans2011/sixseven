@@ -1,4 +1,10 @@
 import os
+import base64
+import hashlib
+import hmac
+import ipaddress
+import struct
+import time
 import bcrypt
 import jwt
 from datetime import datetime, timezone, timedelta
@@ -7,7 +13,7 @@ from bson import ObjectId
 from database import get_db
 
 JWT_ALGORITHM = "HS256"
-ACCESS_TOKEN_MINUTES = 60 * 12  # 12h
+ACCESS_TOKEN_MINUTES = 60 * 12
 REFRESH_TOKEN_DAYS = 7
 MAX_LOGIN_ATTEMPTS = 5
 LOCKOUT_MINUTES = 15
@@ -101,6 +107,48 @@ async def require_admin(user: dict = Depends(get_current_user)) -> dict:
     return user
 
 
+def get_request_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else ""
+
+
+def admin_network_allowed(request: Request) -> bool:
+    raw = os.environ.get("ADMIN_ALLOWED_CIDRS", "").strip()
+    if not raw:
+        return True
+    try:
+        ip = ipaddress.ip_address(get_request_ip(request))
+        networks = [ipaddress.ip_network(x.strip(), strict=False) for x in raw.split(",") if x.strip()]
+        return any(ip in network for network in networks)
+    except ValueError:
+        return False
+
+
+def generate_totp_secret() -> str:
+    return base64.b32encode(os.urandom(20)).decode("ascii").rstrip("=")
+
+
+def totp_code(secret: str, counter: int) -> str:
+    padded = secret + "=" * ((8 - len(secret) % 8) % 8)
+    key = base64.b32decode(padded, casefold=True)
+    msg = struct.pack(">Q", counter)
+    digest = hmac.new(key, msg, hashlib.sha1).digest()
+    offset = digest[-1] & 0x0F
+    number = struct.unpack(">I", digest[offset:offset + 4])[0] & 0x7FFFFFFF
+    return f"{number % 1000000:06d}"
+
+
+def verify_totp(secret: str, code: str, window: int = 1) -> bool:
+    if not secret or not code or not code.isdigit() or len(code) != 6:
+        return False
+    counter = int(time.time()) // 30
+    supplied = code
+    return any(hmac.compare_digest(totp_code(secret, counter + offset), supplied)
+               for offset in range(-window, window + 1))
+
+
 async def check_lockout(identifier: str) -> None:
     db = get_db()
     rec = await db.login_attempts.find_one({"identifier": identifier})
@@ -111,7 +159,7 @@ async def check_lockout(identifier: str) -> None:
         if isinstance(locked, str):
             locked = datetime.fromisoformat(locked)
         if locked > datetime.now(timezone.utc):
-            raise HTTPException(status_code=429, detail=f"Too many attempts. Try again later.")
+            raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
 
 
 async def record_failed_login(identifier: str) -> None:
