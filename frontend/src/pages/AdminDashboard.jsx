@@ -4,7 +4,7 @@ import api, { formatApiErrorDetail } from "@/lib/api";
 import Header from "@/components/Header";
 import { useAuth } from "@/lib/auth";
 import { toast } from "sonner";
-import { LayoutDashboard, Users, FileText, ShoppingBag, CreditCard, Server, Bell, ClipboardList, Settings, Download, Upload, Paperclip, Trash2, Search, BarChart3, ArrowRightCircle } from "lucide-react";
+import { LayoutDashboard, Users, FileText, ShoppingBag, CreditCard, Server, Bell, ClipboardList, Settings, Download, Upload, Paperclip, Trash2, Search, BarChart3, ArrowRightCircle, MessageCircle } from "lucide-react";
 import MessagesThread from "@/components/MessagesThread";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -642,6 +642,44 @@ function AdminNotifs() {
   );
 }
 
+
+function SupportTicketsAdmin() {
+  const [items, setItems] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [status, setStatus] = useState("");
+  const [priority, setPriority] = useState("");
+  const [reply, setReply] = useState("");
+  const [busy, setBusy] = useState(false);
+  const load = () => api.get(`/support/admin/tickets${status || priority ? `?${new URLSearchParams({...(status?{status}:{}),...(priority?{priority}:{})}).toString()}` : ""}`).then(r=>setItems(r.data));
+  useEffect(()=>{ load(); }, [status, priority]);
+  const update = async (extra={}) => {
+    if (!selected) return;
+    setBusy(true);
+    try { const {data}=await api.put(`/support/admin/tickets/${selected.id}`, extra); setSelected(data); setReply(""); load(); toast.success("Ticket updated"); }
+    catch(e){ toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
+    finally { setBusy(false); }
+  };
+  return <div>
+    <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="font-serif text-2xl font-bold text-[#0A1128]">Support Tickets</h2>
+      <div className="flex gap-2"><select className="zx-input" value={status} onChange={e=>setStatus(e.target.value)}><option value="">All statuses</option><option value="open">Open</option><option value="in_progress">In progress</option><option value="waiting_customer">Waiting customer</option><option value="resolved">Resolved</option><option value="closed">Closed</option></select>
+      <select className="zx-input" value={priority} onChange={e=>setPriority(e.target.value)}><option value="">All priorities</option><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option></select></div>
+    </div>
+    <div className="overflow-x-auto mt-4"><table className="zx-table"><thead><tr><th>Ticket</th><th>Customer</th><th>Subject</th><th>Priority</th><th>Status</th><th>Updated</th></tr></thead><tbody>
+      {items.map(t=><tr key={t.id} onClick={()=>setSelected(t)} className="cursor-pointer"><td>{t.ticket_number}</td><td>{t.customer_name}<div className="text-xs text-[#6B7280]">{t.customer_email}</div></td><td>{t.subject}</td><td>{t.priority}</td><td>{t.status.replace(/_/g," ")}</td><td className="text-xs">{new Date(t.updated_at).toLocaleString()}</td></tr>)}
+      {items.length===0 && <tr><td colSpan="6" className="text-center py-6 text-[#6B7280]">No support tickets.</td></tr>}
+    </tbody></table></div>
+    {selected && <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-40" onClick={()=>setSelected(null)}>
+      <div className="bg-white max-w-3xl w-full p-6 border max-h-[90vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
+        <div className="flex justify-between"><div><div className="text-xs uppercase text-[#00509E]">{selected.ticket_number}</div><h3 className="font-serif text-xl font-bold">{selected.subject}</h3><div className="text-xs text-[#6B7280]">{selected.customer_name} · {selected.customer_email}</div></div><button onClick={()=>setSelected(null)}>✕</button></div>
+        <div className="mt-4 text-sm whitespace-pre-wrap">{selected.message}</div>
+        <div className="mt-4 flex flex-wrap gap-2"><select className="zx-input max-w-xs" value={selected.status} onChange={e=>setSelected({...selected,status:e.target.value})}><option value="open">Open</option><option value="in_progress">In progress</option><option value="waiting_customer">Waiting customer</option><option value="resolved">Resolved</option><option value="closed">Closed</option></select><select className="zx-input max-w-xs" value={selected.priority} onChange={e=>setSelected({...selected,priority:e.target.value})}><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option></select><button className="zx-btn-primary" disabled={busy} onClick={()=>update({status:selected.status,priority:selected.priority})}>Save</button></div>
+        <div className="mt-5 space-y-2">{(selected.replies||[]).map(r=><div key={r.id} className="border border-[#E5E7EB] p-3 text-sm"><div className="text-xs font-semibold text-[#6B7280]">{r.role === "admin" ? "Admin" : selected.customer_name} · {new Date(r.created_at).toLocaleString()}</div><div className="mt-1 whitespace-pre-wrap">{r.message}</div></div>)}</div>
+        {!["closed"].includes(selected.status) && <div className="mt-4 flex gap-2"><textarea className="zx-input" rows={3} placeholder="Reply to customer" value={reply} onChange={e=>setReply(e.target.value)} /><button className="zx-btn-primary self-end" disabled={busy || !reply.trim()} onClick={()=>update({reply, status:"in_progress"})}>Reply</button></div>}
+      </div>
+    </div>}
+  </div>;
+}
+
 function AuditLogs() {
   const [items, setItems] = useState([]);
   useEffect(()=>{ api.get("/admin/audit-logs").then(r=>setItems(r.data)); },[]);
@@ -733,6 +771,7 @@ export default function AdminDashboard() {
     { to: "/admin", label: "Dashboard", icon: LayoutDashboard, end: true },
     { to: "/admin/customers", label: "Customers", icon: Users },
     { to: "/admin/enquiries", label: "Enquiries", icon: FileText },
+    { to: "/admin/support", label: "Support Tickets", icon: MessageCircle },
     { to: "/admin/orders", label: "Orders", icon: ShoppingBag },
     { to: "/admin/payments", label: "Payments", icon: CreditCard },
     { to: "/admin/services", label: "Services", icon: Server },
@@ -769,6 +808,7 @@ export default function AdminDashboard() {
             <Route index element={<Dash />} />
             <Route path="customers" element={<Customers />} />
             <Route path="enquiries" element={<Enquiries />} />
+            <Route path="support" element={<SupportTicketsAdmin />} />
             <Route path="orders" element={<Orders />} />
             <Route path="payments" element={<Payments />} />
             <Route path="services" element={<ServicesAdmin />} />
