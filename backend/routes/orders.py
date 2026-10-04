@@ -81,7 +81,11 @@ async def create_order(data: OrderIn, user=Depends(get_current_user)):
     doc["_id"] = res.inserted_id
     await _add_status_history(db, str(res.inserted_id), "", "CREATED", user["id"], user["email"], "Order created")
     await notify_user(user["id"], "Order created", f"Your order {number} has been created for {service['name']}. Please complete payment to proceed.", now=now)
-    await notify_admins("New order received", f"Order {number} was created by {user.get('name') or user['email']} for {service['name']} (₹{float(service.get('price', 0)):,.0f}).", now=now)
+    admin_msg = f"Order {number} was created by {user.get('name') or user['email']} for {service['name']} (₹{float(service.get('price', 0)):,.0f})."
+    await notify_admins("New order received", admin_msg, now=now)
+    admins = await db.users.find({"role": "admin", "disabled": {"$ne": True}}, {"email": 1}).to_list(1000)
+    for a in admins:
+        if a.get("email"): email_svc.admin_event(to_email=a["email"], event_title="New order received", message=admin_msg)
     await audit_log("order_created", user["id"], user["email"], "order", str(res.inserted_id), {"number": number})
     email_svc.order_created(
         to_email=user["email"], name=user.get("name", ""),
