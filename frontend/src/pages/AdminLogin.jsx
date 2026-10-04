@@ -1,10 +1,8 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import api from "@/lib/api";
 
 export default function AdminLogin() {
-  const nav = useNavigate();
   const [step, setStep] = useState("password");
   const [form, setForm] = useState({ email: "", password: "" });
   const [challenge, setChallenge] = useState("");
