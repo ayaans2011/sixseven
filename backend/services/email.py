@@ -23,7 +23,6 @@ def _cfg(key: str, default: str = "") -> str:
     return os.environ.get(key, default)
 
 
-# ---------- Guardrail gate ----------
 _SHORTENERS = ("bit.ly", "tinyurl.com", "t.co", "is.gd", "cutt.ly", "goo.gl", "rebrand.ly")
 _CRED_ASK = (
     "reply with your password", "reply with the code", "send your password", "cvv",
@@ -98,9 +97,7 @@ def _assert_safe_email(subject: str, html: str) -> None:
                 raise ValueError(f"Anchor text {m.group(1)!r} != real link host {real!r} (G3)")
 
 
-# ---------- Core send ----------
 async def _send_email(*, to: str, subject: str, html: str) -> str | None:
-    """Low-level send. Returns email id or None on failure. Never raises."""
     key = _cfg("EMERGENT_EMAIL_KEY")
     from_name = _cfg("EMAIL_FROM_NAME", "ZEROAXIS")
     reply_to = _cfg("EMAIL_REPLY_TO")
@@ -135,15 +132,12 @@ async def _send_email(*, to: str, subject: str, html: str) -> str | None:
 
 
 def _bg_send(**kwargs):
-    """Fire-and-forget send. Never blocks the caller, never raises."""
     try:
         asyncio.create_task(_send_email(**kwargs))
     except RuntimeError:
-        # No running loop (e.g. shutdown). Best-effort skip.
         pass
 
 
-# ---------- Templates ----------
 _BRAND = "ZEROAXIS"
 
 
@@ -186,7 +180,6 @@ def _button(href: str, label: str) -> str:
     )
 
 
-# ---------- Public template helpers ----------
 def enquiry_received(*, to_email: str, name: str, enquiry_number: str, service_name: str | None):
     subject = f"Enquiry received — {enquiry_number}"
     track_url = _app_url("/track")
@@ -205,9 +198,25 @@ def enquiry_received(*, to_email: str, name: str, enquiry_number: str, service_n
     _bg_send(to=to_email, subject=subject, html=_wrap(inner))
 
 
+def enquiry_account_activation(*, to_email: str, name: str, enquiry_number: str, activation_token: str):
+    subject = f"Your ZEROAXIS account is ready — {enquiry_number}"
+    activation_url = _app_url(f"/activate-account?token={activation_token}")
+    inner = (
+        f'<p>Hi {escape(name or "there")},</p>'
+        f'<p>We received your enquiry <b>{escape(enquiry_number)}</b> and created a customer account '
+        f'for you using this email address.</p>'
+        f'<p>For security, we did not email you a password. Use the secure one-time link below '
+        f'to choose your own password.</p>'
+        f'{_button(activation_url, "Set your password") if activation_url else ""}'
+        f'<p style="font-size:12px;color:#6B7280;margin-top:16px">'
+        f'This link expires in 30 minutes and can only be used once.</p>'
+        f'<p style="font-size:12px;color:#6B7280">If you did not submit this enquiry, you can safely ignore this email.</p>'
+    )
+    _bg_send(to=to_email, subject=subject, html=_wrap(inner))
+
+
 def enquiry_response(*, to_email: str, name: str, enquiry_number: str, response_text: str):
     subject = f"Response to your enquiry — {enquiry_number}"
-    # Response text is admin-typed (server actor) but we still escape it.
     inner = (
         f'<p>Hi {escape(name or "there")},</p>'
         f'<p>Our team has responded to your enquiry <b>{escape(enquiry_number)}</b>:</p>'
@@ -222,7 +231,7 @@ def order_created(*, to_email: str, name: str, order_number: str, service_name: 
     subject = f"Order created — {order_number}"
     dash_url = _app_url("/dashboard/orders")
     inner = (
-        f'<p>Hi {escape(name or "there")},</p>'
+        f'<p>Hi {escape(name or "there")}</p>'
         f'<p>Your order has been created. Please complete the payment to proceed.</p>'
         f'<table role="presentation" cellpadding="0" cellspacing="0" '
         f'style="background:#f8f9fa;border:1px solid #e5e7eb;padding:14px 18px;margin:14px 0">'
@@ -238,7 +247,7 @@ def order_created(*, to_email: str, name: str, order_number: str, service_name: 
 def payment_submitted(*, to_email: str, name: str, order_number: str, amount: float, reference: str):
     subject = f"Payment submitted — {order_number}"
     inner = (
-        f'<p>Hi {escape(name or "there")},</p>'
+        f'<p>Hi {escape(name or "there")}</p>'
         f'<p>We have received your payment submission for order '
         f'<b>{escape(order_number)}</b>. It is now pending verification by our team.</p>'
         f'<table role="presentation" cellpadding="0" cellspacing="0" '
@@ -255,7 +264,7 @@ def payment_verified(*, to_email: str, name: str, order_number: str, amount: flo
     subject = f"Payment verified — {order_number}"
     dash_url = _app_url("/dashboard/orders")
     inner = (
-        f'<p>Hi {escape(name or "there")},</p>'
+        f'<p>Hi {escape(name or "there")}</p>'
         f'<p>Your payment for order <b>{escape(order_number)}</b> has been verified. '
         f'Work will begin as scheduled.</p>'
         f'<table role="presentation" cellpadding="0" cellspacing="0" '
@@ -285,7 +294,7 @@ def password_reset(*, to_email: str, name: str, reset_token: str, otp: str):
 def payment_rejected(*, to_email: str, name: str, order_number: str, note: str):
     subject = f"Payment rejected — {order_number}"
     inner = (
-        f'<p>Hi {escape(name or "there")},</p>'
+        f'<p>Hi {escape(name or "there")}</p>'
         f'<p>Your payment for order <b>{escape(order_number)}</b> could not be verified.</p>'
         f'{f"<p><b>Reason:</b> {escape(note)}</p>" if note else ""}'
         f'<p>Please resubmit the correct payment reference from your dashboard.</p>'
@@ -303,7 +312,7 @@ def payment_reminder(*, to_email: str, name: str, order_number: str, amount: flo
         f"Just a gentle reminder that your order was created {days_since_created} day(s) ago and the payment is still pending. Please complete it so we can begin the work."
     )
     inner = (
-        f'<p>Hi {escape(name or "there")},</p>'
+        f'<p>Hi {escape(name or "there")}</p>'
         f'<p>{lead}</p>'
         f'<table role="presentation" cellpadding="0" cellspacing="0" '
         f'style="background:#f8f9fa;border:1px solid #e5e7eb;padding:14px 18px;margin:14px 0">'
@@ -320,7 +329,7 @@ def status_changed(*, to_email: str, name: str, order_number: str, new_status: s
     subject = f"Order status updated — {order_number}"
     label = new_status.replace("_", " ").title()
     inner = (
-        f'<p>Hi {escape(name or "there")},</p>'
+        f'<p>Hi {escape(name or "there")}</p>'
         f'<p>Order <b>{escape(order_number)}</b> is now <b>{escape(label)}</b>.</p>'
         f'{f"<p>{escape(note)}</p>" if note else ""}'
     )
@@ -330,7 +339,7 @@ def status_changed(*, to_email: str, name: str, order_number: str, new_status: s
 def registration_otp(*, to_email: str, name: str, otp: str):
     subject = "Verify your ZEROAXIS email"
     inner = (
-        f'<p>Hi {escape(name or "there")},</p>'
+        f'<p>Hi {escape(name or "there")}</p>'
         f'<p>Use the verification code below to complete your ZEROAXIS registration.</p>'
         f'<p style="font-size:22px;letter-spacing:5px;font-weight:700"><b>{escape(otp)}</b></p>'
         f'<p>This code is valid for <b>10 minutes</b> and can only be used once.</p>'
