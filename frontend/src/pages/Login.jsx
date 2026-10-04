@@ -26,8 +26,7 @@ export default function LoginPage() {
     try {
       await api.post("/auth/reset-password", { token: resetToken, otp: resetOtp, new_password: resetPassword });
       toast.success("Password updated");
-      window.history.replaceState({}, "", "/login");
-      window.location.reload();
+      nav("/login", { replace: true });
     } catch (e) { setErr(e.response?.data?.detail || "Unable to reset password"); }
     finally { setBusy(false); }
   };
