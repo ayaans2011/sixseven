@@ -368,3 +368,25 @@ def support_ticket_reply(*, to_email: str, name: str, ticket_number: str, messag
         f'<p>Please sign in to your dashboard if you need to reply.</p>'
     )
     _bg_send(to=to_email, subject=subject_line, html=_wrap(inner))
+
+
+def admin_event(*, to_email: str, event_title: str, message: str):
+    subject = f"{event_title} — ZEROAXIS"
+    inner = (
+        f'<p>Hello ZEROAXIS Admin,</p>'
+        f'<p>{escape(message)}</p>'
+        f'<p>Please sign in to the admin dashboard to review this activity.</p>'
+    )
+    _bg_send(to=to_email, subject=subject, html=_wrap(inner))
+
+
+def support_ticket_status_changed(*, to_email: str, name: str, ticket_number: str, status: str, priority: str):
+    subject = f"Support ticket changed — {ticket_number}"
+    inner = (
+        f'<p>Hi {escape(name or "there")},</p>'
+        f'<p>Your support ticket <b>{escape(ticket_number)}</b> has been updated.</p>'
+        f'<p><b>Status:</b> {escape(status.replace("_", " ").title())}<br>'
+        f'<b>Priority:</b> {escape(priority.title())}</p>'
+        f'<p>Sign in to your dashboard to view the latest details.</p>'
+    )
+    _bg_send(to=to_email, subject=subject, html=_wrap(inner))
