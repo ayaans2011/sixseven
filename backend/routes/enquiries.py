@@ -1,13 +1,14 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Depends
 from bson import ObjectId
+import hashlib
+import secrets as _secrets
 
 from database import get_db
 from security import get_current_user, require_admin, hash_password, audit_log
 from models import EnquiryIn, EnquiryResponse
 from counters import generate_enquiry_number, generate_order_number
 from services import email as email_svc
-import secrets as _secrets
 
 router = APIRouter(prefix="/api/enquiries", tags=["enquiries"])
 
@@ -34,22 +35,75 @@ def _serialize(e: dict) -> dict:
 
 @router.post("/public")
 async def create_enquiry_public(data: EnquiryIn):
-    """Public enquiry (no login required)."""
+    """Public enquiry: create/link a customer account and send a secure activation link."""
     db = get_db()
+    email = data.email.lower().strip()
     number = await generate_enquiry_number()
+    now = datetime.now(timezone.utc)
+    customer_id = None
+    new_customer = False
+
+    # Link to an existing account when the email is already registered.
+    existing = await db.users.find_one({"email": email})
+    if existing:
+        customer_id = str(existing["_id"])
+    else:
+        # Create an account with a random unusable-by-email password. The customer
+        # chooses the real password through a one-time activation link.
+        random_password = _secrets.token_urlsafe(32)
+        user_doc = {
+            "email": email,
+            "name": data.name.strip(),
+            "phone": data.phone,
+            "password_hash": hash_password(random_password),
+            "role": "customer",
+            "account_status": "pending_activation",
+            "created_at": now.isoformat(),
+            "created_via": "public_enquiry",
+        }
+        res_user = await db.users.insert_one(user_doc)
+        customer_id = str(res_user.inserted_id)
+        new_customer = True
+
+        token = _secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        await db.account_activation_tokens.insert_one({
+            "user_id": customer_id,
+            "token_hash": token_hash,
+            "used": False,
+            "expires_at": now + timedelta(minutes=30),
+            "created_at": now,
+        })
+        email_svc.enquiry_account_activation(
+            to_email=email,
+            name=data.name.strip(),
+            enquiry_number=number,
+            activation_token=token,
+        )
+
     doc = data.model_dump()
     doc.update({
+        "email": email,
         "enquiry_number": number,
-        "customer_id": None,
+        "customer_id": customer_id,
         "status": "new",
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": now.isoformat(),
+        "updated_at": now.isoformat(),
     })
     res = await db.enquiries.insert_one(doc)
     doc["_id"] = res.inserted_id
+
     email_svc.enquiry_received(
-        to_email=doc["email"], name=doc.get("name", ""),
+        to_email=email, name=data.name.strip(),
         enquiry_number=number, service_name=doc.get("service_name"),
+    )
+    await audit_log(
+        "public_enquiry_received",
+        customer_id,
+        email,
+        "enquiry",
+        str(res.inserted_id),
+        {"new_customer": new_customer},
     )
     return _serialize(doc)
 
@@ -67,7 +121,6 @@ async def create_enquiry(data: EnquiryIn, user=Depends(get_current_user)):
         "updated_at": datetime.now(timezone.utc).isoformat(),
     })
     res = await db.enquiries.insert_one(doc)
-    # Notify user
     await db.notifications.insert_one({
         "user_id": user["id"],
         "title": "Enquiry received",
@@ -104,7 +157,6 @@ async def get_enquiry(eid: str, user=Depends(get_current_user)):
     return _serialize(e)
 
 
-# Admin endpoints
 @router.get("/admin/all")
 async def admin_list(admin=Depends(require_admin)):
     db = get_db()
@@ -147,13 +199,7 @@ async def respond(eid: str, data: EnquiryResponse, admin=Depends(require_admin))
 
 @router.post("/{eid}/convert")
 async def convert_to_order(eid: str, admin=Depends(require_admin), service_id: str | None = None):
-    """Admin: convert an enquiry into an order for the same customer.
-
-    - If the enquiry has a linked customer_id, use it.
-    - Otherwise create a customer account from the enquiry's email/name with a
-      random password, and email them a note (they can reset via forgot-password).
-    Uses enquiry.service_id unless a service_id is passed as query parameter.
-    """
+    """Admin: convert an enquiry into an order for the same customer."""
     db = get_db()
     try:
         oid = ObjectId(eid)
@@ -175,27 +221,40 @@ async def convert_to_order(eid: str, admin=Depends(require_admin), service_id: s
     if not service:
         raise HTTPException(status_code=404, detail="Service not found")
 
-    # Resolve or create customer
     customer_id = e.get("customer_id")
     customer_email = (e.get("email") or "").lower().strip()
     customer_name = e.get("name") or ""
-    generated_password = None
     if not customer_id:
-        # Look up by email, else create
         cust = await db.users.find_one({"email": customer_email}) if customer_email else None
         if not cust:
-            generated_password = _secrets.token_urlsafe(9)
+            random_password = _secrets.token_urlsafe(32)
             new_doc = {
                 "email": customer_email,
                 "name": customer_name or "Customer",
                 "phone": e.get("phone"),
-                "password_hash": hash_password(generated_password),
+                "password_hash": hash_password(random_password),
                 "role": "customer",
+                "account_status": "pending_activation",
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "created_via": "enquiry_conversion",
             }
             res_u = await db.users.insert_one(new_doc)
             customer_id = str(res_u.inserted_id)
+            token = _secrets.token_urlsafe(32)
+            token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+            await db.account_activation_tokens.insert_one({
+                "user_id": customer_id,
+                "token_hash": token_hash,
+                "used": False,
+                "expires_at": datetime.now(timezone.utc) + timedelta(minutes=30),
+                "created_at": datetime.now(timezone.utc),
+            })
+            email_svc.enquiry_account_activation(
+                to_email=customer_email,
+                name=customer_name or "Customer",
+                enquiry_number=e.get("enquiry_number", ""),
+                activation_token=token,
+            )
         else:
             customer_id = str(cust["_id"])
             customer_name = cust.get("name") or customer_name
@@ -205,7 +264,6 @@ async def convert_to_order(eid: str, admin=Depends(require_admin), service_id: s
             customer_email = cu.get("email") or customer_email
             customer_name = cu.get("name") or customer_name
 
-    # Create the order
     order_number = await generate_order_number()
     now = datetime.now(timezone.utc).isoformat()
     order_doc = {
@@ -238,14 +296,12 @@ async def convert_to_order(eid: str, admin=Depends(require_admin), service_id: s
         "timestamp": now,
     })
 
-    # Mark enquiry as converted
     await db.enquiries.update_one({"_id": oid}, {"$set": {
         "status": "converted",
         "converted_order_id": order_id,
         "updated_at": now,
     }})
 
-    # Notify customer + audit
     await db.notifications.insert_one({
         "user_id": customer_id,
         "title": "Order created from your enquiry",
@@ -254,10 +310,8 @@ async def convert_to_order(eid: str, admin=Depends(require_admin), service_id: s
         "created_at": now,
     })
     await audit_log("enquiry_converted", admin["id"], admin["email"], "enquiry", eid,
-                    {"order_id": order_id, "order_number": order_number,
-                     "created_customer": bool(generated_password)})
+                    {"order_id": order_id, "order_number": order_number})
 
-    # Email customer
     if customer_email:
         email_svc.order_created(
             to_email=customer_email, name=customer_name,
@@ -268,5 +322,5 @@ async def convert_to_order(eid: str, admin=Depends(require_admin), service_id: s
         "success": True,
         "order_id": order_id,
         "order_number": order_number,
-        "new_customer_created": bool(generated_password),
+        "new_customer_created": bool(customer_id and not e.get("customer_id")),
     }
