@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import { toast } from "sonner";
+import api from "@/lib/api";
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -22,7 +22,7 @@ export default function LoginPage() {
     if (resetPassword.length < 6) { setErr("Password must be at least 6 characters."); setBusy(false); return; }
     if (resetPassword !== resetConfirm) { setErr("Passwords do not match."); setBusy(false); return; }
     try {
-      await (await import("@/lib/api")).default.post("/auth/reset-password", { token: resetToken, new_password: resetPassword });
+      await api.post("/auth/reset-password", { token: resetToken, new_password: resetPassword });
       toast.success("Password updated");
       window.history.replaceState({}, "", "/login");
       window.location.reload();
@@ -30,7 +30,7 @@ export default function LoginPage() {
     finally { setBusy(false); }
   };
 
-  const submit = async (e) =>
+  const submit = async (e) => {
     e.preventDefault(); setBusy(true); setErr("");
     const r = await login(form.email, form.password);
     setBusy(false);
