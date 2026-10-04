@@ -10,6 +10,7 @@ from security import get_current_user, require_admin, audit_log
 from models import OrderIn, OrderStatusUpdate, PaymentSubmitIn, PaymentVerifyIn, ORDER_STATUSES
 from counters import generate_order_number
 from services import email as email_svc
+from services.notifications import notify_user, notify_admins
 from services.invoice import generate_invoice_pdf
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
@@ -79,13 +80,8 @@ async def create_order(data: OrderIn, user=Depends(get_current_user)):
     res = await db.orders.insert_one(doc)
     doc["_id"] = res.inserted_id
     await _add_status_history(db, str(res.inserted_id), "", "CREATED", user["id"], user["email"], "Order created")
-    await db.notifications.insert_one({
-        "user_id": user["id"],
-        "title": "Order created",
-        "body": f"Your order {number} has been created. Please complete payment to proceed.",
-        "read": False,
-        "created_at": now,
-    })
+    await notify_user(user["id"], "Order created", f"Your order {number} has been created for {service['name']}. Please complete payment to proceed.", now=now)
+    await notify_admins("New order received", f"Order {number} was created by {user.get('name') or user['email']} for {service['name']} (₹{float(service.get('price', 0)):,.0f}).", now=now)
     await audit_log("order_created", user["id"], user["email"], "order", str(res.inserted_id), {"number": number})
     email_svc.order_created(
         to_email=user["email"], name=user.get("name", ""),
@@ -194,13 +190,8 @@ async def submit_payment(oid: str, data: PaymentSubmitIn, user=Depends(get_curre
         "updated_at": now,
     }})
     await _add_status_history(db, oid, prev_ord, "PAYMENT_SUBMITTED", user["id"], user["email"], f"Payment via {data.method}, ref {data.reference}")
-    await db.notifications.insert_one({
-        "user_id": user["id"],
-        "title": "Payment submitted",
-        "body": f"Payment for order {o['order_number']} submitted. Awaiting verification.",
-        "read": False,
-        "created_at": now,
-    })
+    await notify_user(user["id"], "Payment submitted", f"Payment for order {o['order_number']} was submitted and is awaiting verification.", now=now)
+    await notify_admins("Payment awaiting verification", f"Payment submitted for order {o['order_number']} by {user.get('name') or user['email']}. Reference: {data.reference}.", now=now)
     await audit_log("payment_submitted", user["id"], user["email"], "order", oid, {"prev": prev_pay})
     email_svc.payment_submitted(
         to_email=user["email"], name=user.get("name", ""),
