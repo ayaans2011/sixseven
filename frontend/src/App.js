@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useSearchParams } from "react-router-dom";
 import { Toaster } from "sonner";
 import { AuthProvider } from "@/lib/auth";
 import ProtectedRoute from "@/components/ProtectedRoute";
@@ -20,13 +20,18 @@ function OrdersRedirect() {
   return <Navigate to="/dashboard/orders" replace />;
 }
 
+function EntryRoute() {
+  const [params] = useSearchParams();
+  return params.get("reset_token") ? <Login /> : <Home />;
+}
+
 export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
         <Toaster richColors position="top-right" />
         <Routes>
-          <Route path="/" element={<Home />} />
+          <Route path="/" element={<EntryRoute />} />
           <Route path="/about" element={<About />} />
           <Route path="/services" element={<ServicesPage />} />
           <Route path="/enquiry" element={<Enquiry />} />
