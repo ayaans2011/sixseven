@@ -2,11 +2,9 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import api from "@/lib/api";
-import { useAuth } from "@/lib/auth";
 
 export default function AdminLogin() {
   const nav = useNavigate();
-  const { refresh } = useAuth();
   const [step, setStep] = useState("password");
   const [form, setForm] = useState({ email: "", password: "" });
   const [challenge, setChallenge] = useState("");
@@ -38,11 +36,11 @@ export default function AdminLogin() {
       const endpoint = step === "setup" ? "/admin-auth/setup" : "/admin-auth/verify";
       const { data } = await api.post(endpoint, { challenge, code });
       if (data.role === "admin") {
-        // The dedicated admin login bypasses AuthProvider.login(), so explicitly
-        // refresh the shared auth state before entering the protected admin route.
-        await refresh();
         toast.success("Admin signed in");
-        nav("/admin", { replace: true });
+        // Reload the protected route so AuthProvider reads the newly-issued
+        // HttpOnly session cookie from the server instead of relying on a
+        // client-side state handoff.
+        window.location.replace("/admin");
       }
     } catch (e) {
       setError(e.response?.data?.detail || "Invalid authenticator code");
