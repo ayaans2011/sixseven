@@ -32,7 +32,7 @@ app = FastAPI(title="ZEROAXIS API", version="1.0")
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
+    allow_origins=[origin.strip() for origin in os.environ.get("CORS_ORIGINS", "https://sixseven-frontend.onrender.com").split(",") if origin.strip()],
     allow_methods=["*"],
     allow_headers=["*"],
 )
