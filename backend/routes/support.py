@@ -141,8 +141,6 @@ async def admin_update_ticket(ticket_id: str, data: SupportTicketUpdateIn, admin
     if data.status is not None: updates["status"] = data.status
     if data.priority is not None: updates["priority"] = data.priority
     if data.reply is not None:
-        updates.setdefault("$push", {})
-    if data.reply is not None:
         reply = {"id": f"{admin['id']}-{now}", "role": "admin", "name": admin.get("name", "Admin"), "email": admin["email"], "message": data.reply.strip(), "created_at": now}
         await db.support_tickets.update_one({"_id": oid}, {"$set": updates, "$push": {"replies": reply}})
     else:
