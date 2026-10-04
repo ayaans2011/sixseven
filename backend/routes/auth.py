@@ -10,7 +10,7 @@ from security import (
     set_auth_cookies, clear_auth_cookies, get_current_user,
     check_lockout, record_failed_login, clear_login_attempts, audit_log,
 )
-from models import RegisterIn, LoginIn, ForgotPasswordIn, ResetPasswordIn, RegisterOtpIn
+from models import RegisterIn, LoginIn, ForgotPasswordIn, ResetPasswordIn, RegisterOtpIn, ActivateAccountIn
 from services.email import password_reset, registration_otp
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -104,6 +104,40 @@ async def verify_registration_otp(data: RegisterOtpIn, response: Response):
     return _serialize_user(doc)
 
 
+@router.post("/activate-account")
+async def activate_account(data: ActivateAccountIn):
+    db = get_db()
+    token_hash = hashlib.sha256(data.token.encode("utf-8")).hexdigest()
+    rec = await db.account_activation_tokens.find_one({
+        "token_hash": token_hash,
+        "used": False,
+        "expires_at": {"$gt": datetime.now(timezone.utc)},
+    })
+    if not rec:
+        raise HTTPException(status_code=400, detail="Invalid or expired account activation link")
+
+    try:
+        user_id = ObjectId(rec["user_id"])
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid account activation link")
+
+    result = await db.users.update_one(
+        {"_id": user_id},
+        {"$set": {
+            "password_hash": hash_password(data.new_password),
+            "account_status": "active",
+        }},
+    )
+    if result.matched_count != 1:
+        raise HTTPException(status_code=400, detail="Account activation link is invalid")
+
+    await db.account_activation_tokens.update_one(
+        {"_id": rec["_id"]},
+        {"$set": {"used": True, "used_at": datetime.now(timezone.utc)}},
+    )
+    return {"success": True}
+
+
 @router.post("/login")
 async def login(data: LoginIn, request: Request, response: Response):
     db = get_db()
@@ -144,9 +178,7 @@ async def forgot_password(data: ForgotPasswordIn):
     email = data.email.lower().strip()
     user = await db.users.find_one({"email": email})
 
-    # Do not disclose whether the account exists.
     if user:
-        # Invalidate any previous reset links for this account.
         await db.password_reset_tokens.update_many(
             {"user_id": str(user["_id"]), "used": False},
             {"$set": {"used": True}},
