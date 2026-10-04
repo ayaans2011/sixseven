@@ -121,6 +121,14 @@ async def reply_ticket(ticket_id: str, data: SupportTicketReplyIn, user=Depends(
             )
     else:
         await notify_admins("Customer replied to support ticket", f"{t.get('ticket_number')} from {user.get('name') or user['email']}: {data.message.strip()}")
+        admins = await db.users.find({"role": "admin", "disabled": {"$ne": True}}, {"email": 1}).to_list(1000)
+        for a in admins:
+            if a.get("email"):
+                email_svc.admin_event(
+                    to_email=a["email"],
+                    event_title="Customer replied to support ticket",
+                    message=f"Customer {user.get('name') or user['email']} replied to support ticket {t.get('ticket_number')}: {data.message.strip()}",
+                )
     await audit_log("support_ticket_reply", user["id"], user["email"], "support_ticket", ticket_id, {"role": role})
     updated = await db.support_tickets.find_one({"_id": oid})
     return _serialize(updated)
@@ -167,6 +175,13 @@ async def admin_update_ticket(ticket_id: str, data: SupportTicketUpdateIn, admin
         if data.status is not None: parts.append(f"status: {data.status.replace('_', ' ')}")
         if data.priority is not None: parts.append(f"priority: {data.priority}")
         await notify_user(t.get("customer_id"), "Support ticket changed", f"Ticket {t.get('ticket_number')} was updated ({', '.join(parts)}).")
+        if t.get("customer_email"):
+            await_email_status = True
+            email_svc.support_ticket_status_changed(
+                to_email=t["customer_email"], name=t.get("customer_name", ""),
+                ticket_number=t["ticket_number"], status=data.status or t.get("status", ""),
+                priority=data.priority or t.get("priority", "normal"),
+            )
     if data.reply is not None:
         await notify_user(t.get("customer_id"), "Support ticket reply", f"ZEROAXIS Support replied to ticket {t.get('ticket_number')}: {data.reply.strip()}")
         if t.get("customer_email"):
