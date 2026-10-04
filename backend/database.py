@@ -32,6 +32,7 @@ async def ensure_indexes():
     await db.login_attempts.create_index("identifier")
     await db.password_reset_tokens.create_index("expires_at", expireAfterSeconds=0)
     await db.registration_email_otps.create_index("expires_at", expireAfterSeconds=0)
+    await db.account_activation_tokens.create_index("expires_at", expireAfterSeconds=0)
     await db.services.create_index("slug", unique=True)
     await db.enquiries.create_index("enquiry_number", unique=True)
     await db.enquiries.create_index("customer_id")
