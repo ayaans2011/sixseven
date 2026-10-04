@@ -427,10 +427,10 @@ export default function CustomerDashboard() {
   return (
     <div>
       <Header />
-      <div className="container-page py-8 grid grid-cols-1 md:grid-cols-[220px_1fr] gap-8">
+      <div className="customer-dashboard container-page py-8 grid grid-cols-1 md:grid-cols-[220px_minmax(0,1fr)] gap-8">
         <aside className="border border-[#E5E7EB] bg-white h-fit" data-testid="customer-sidebar">
           <div className="p-3 border-b border-[#E5E7EB] text-xs font-semibold uppercase text-[#6B7280]">Customer</div>
-          <nav className="flex md:flex-col">
+          <nav className="flex flex-col">
             {links.map(l => (
               <NavLink key={l.to} to={l.to} end={l.end} className={({isActive})=>`flex items-center gap-2 px-3 py-2 text-sm border-l-2 ${isActive?"border-l-[#00509E] text-[#00509E] bg-[#F8F9FA] font-semibold":"border-l-transparent text-[#0A1128] hover:bg-[#F8F9FA]"}`} data-testid={`cust-nav-${l.label.replace(/\s+/g,'-').toLowerCase()}`}>
                 <l.icon size={16} /> {l.label}
