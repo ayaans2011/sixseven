@@ -101,3 +101,83 @@ h1, h2, h3, h4, .font-serif {
 .zx-sidebar a { display: flex; align-items: center; gap: .6rem; padding: .55rem .9rem; font-size: .9rem; color: #CBD2DA; border-left: 3px solid transparent; }
 .zx-sidebar a:hover { background: #101932; color: #fff; }
 .zx-sidebar a.active { background: #101932; color: #fff; border-left-color: #00509E; }
+
+/* Admin-only traditional banking-style presentation. Public/customer pages are unaffected. */
+body:has(.zx-sidebar) {
+  background: #E7E9EC;
+  color: #20252B;
+}
+body:has(.zx-sidebar) .zx-sidebar {
+  background: #252B33;
+  border-right: 1px solid #171B20;
+}
+body:has(.zx-sidebar) .zx-sidebar a {
+  color: #C8CDD3;
+  border-left: 3px solid transparent;
+  border-radius: 0;
+  font-size: .86rem;
+  letter-spacing: .01em;
+}
+body:has(.zx-sidebar) .zx-sidebar a:hover {
+  background: #303740;
+  color: #fff;
+}
+body:has(.zx-sidebar) .zx-sidebar a.active {
+  background: #353D46;
+  color: #fff;
+  border-left-color: #B8C1CB;
+}
+body:has(.zx-sidebar) main {
+  background: #E7E9EC;
+}
+body:has(.zx-sidebar) main > div:first-child {
+  background: #F7F7F8;
+  border-bottom: 1px solid #C9CDD2;
+}
+body:has(.zx-sidebar) main > div:last-child {
+  max-width: 1500px;
+}
+body:has(.zx-sidebar) .zx-card {
+  border-radius: 0;
+  border-color: #C9CDD2;
+  box-shadow: 0 1px 2px rgba(0,0,0,.05);
+}
+body:has(.zx-sidebar) .zx-btn-primary {
+  background: #36424F;
+  border-color: #36424F;
+  border-radius: 1px;
+}
+body:has(.zx-sidebar) .zx-btn-primary:hover {
+  background: #28323D;
+}
+body:has(.zx-sidebar) .zx-btn-outline {
+  border-color: #68727D;
+  border-radius: 1px;
+  color: #303740;
+}
+body:has(.zx-sidebar) .zx-input {
+  border-radius: 1px;
+  border-color: #B8BEC5;
+}
+body:has(.zx-sidebar) .zx-table {
+  background: #fff;
+  border: 1px solid #C9CDD2;
+}
+body:has(.zx-sidebar) .zx-table th {
+  background: #EEF0F2;
+  border-bottom-color: #C9CDD2;
+  text-transform: uppercase;
+  font-size: .72rem;
+  letter-spacing: .04em;
+}
+body:has(.zx-sidebar) .zx-table td {
+  border-bottom-color: #D9DDE1;
+}
+body:has(.zx-sidebar) .zx-table tr:hover td {
+  background: #F5F6F7;
+}
+body:has(.zx-sidebar) h1,
+body:has(.zx-sidebar) h2,
+body:has(.zx-sidebar) h3 {
+  letter-spacing: -.01em;
+}
