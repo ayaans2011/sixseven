@@ -9,6 +9,7 @@ from security import get_current_user, require_admin, hash_password, audit_log
 from models import EnquiryIn, EnquiryResponse
 from counters import generate_enquiry_number, generate_order_number
 from services import email as email_svc
+from services.notifications import notify_user, notify_admins
 
 router = APIRouter(prefix="/api/enquiries", tags=["enquiries"])
 
@@ -93,6 +94,8 @@ async def create_enquiry_public(data: EnquiryIn):
     res = await db.enquiries.insert_one(doc)
     doc["_id"] = res.inserted_id
 
+    await notify_user(customer_id, "Enquiry received", f"Your enquiry {number} has been received. Our team will review it and respond.", now=now.isoformat())
+    await notify_admins("New enquiry received", f"Enquiry {number} from {data.name.strip()} ({email})" + (f" about {doc.get('service_name')}." if doc.get("service_name") else "."))
     email_svc.enquiry_received(
         to_email=email, name=data.name.strip(),
         enquiry_number=number, service_name=doc.get("service_name"),
@@ -121,13 +124,8 @@ async def create_enquiry(data: EnquiryIn, user=Depends(get_current_user)):
         "updated_at": datetime.now(timezone.utc).isoformat(),
     })
     res = await db.enquiries.insert_one(doc)
-    await db.notifications.insert_one({
-        "user_id": user["id"],
-        "title": "Enquiry received",
-        "body": f"Your enquiry {number} has been received.",
-        "read": False,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    })
+    await notify_user(user["id"], "Enquiry received", f"Your enquiry {number} has been received. Our team will review it and respond.", now=doc["created_at"])
+    await notify_admins("New enquiry received", f"Enquiry {number} from {user.get('name') or user['email']}" + (f" about {doc.get('service_name')}." if doc.get("service_name") else "."))
     doc["_id"] = res.inserted_id
     email_svc.enquiry_received(
         to_email=user["email"], name=user.get("name", ""),
@@ -180,13 +178,7 @@ async def respond(eid: str, data: EnquiryResponse, admin=Depends(require_admin))
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }})
     if e.get("customer_id"):
-        await db.notifications.insert_one({
-            "user_id": e["customer_id"],
-            "title": "Enquiry response",
-            "body": f"Admin has responded to your enquiry {e.get('enquiry_number')}.",
-            "read": False,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        })
+        await notify_user(e["customer_id"], "Enquiry response", f"ZEROAXIS Support responded to your enquiry {e.get('enquiry_number')}: {data.response}")
     await audit_log("enquiry_responded", admin["id"], admin["email"], "enquiry", eid)
     if e.get("email"):
         email_svc.enquiry_response(
