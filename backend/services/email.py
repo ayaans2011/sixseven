@@ -269,7 +269,7 @@ def payment_verified(*, to_email: str, name: str, order_number: str, amount: flo
 
 def password_reset(*, to_email: str, name: str, reset_token: str):
     subject = "Reset your ZEROAXIS password"
-    reset_url = _app_url(f"/reset-password?token={reset_token}")
+    reset_url = _app_url(f"/login?reset_token={reset_token}")
     inner = (
         f'<p>Hi {escape(name or "there")},</p>'
         f'<p>We received a request to reset the password for your ZEROAXIS account.</p>'
