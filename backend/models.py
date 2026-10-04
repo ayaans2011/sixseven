@@ -31,6 +31,11 @@ class RegisterOtpIn(BaseModel):
     otp: str = Field(min_length=6, max_length=6)
 
 
+class ActivateAccountIn(BaseModel):
+    token: str
+    new_password: str = Field(min_length=6, max_length=128)
+
+
 class ProfileUpdateIn(BaseModel):
     name: Optional[str] = Field(default=None, min_length=2, max_length=80)
     phone: Optional[str] = None
@@ -69,7 +74,7 @@ class EnquiryIn(BaseModel):
 
 class EnquiryResponse(BaseModel):
     response: str
-    status: Optional[str] = "responded"  # responded | closed | converted
+    status: Optional[str] = "responded"
 
 
 # ---------- Orders ----------
@@ -85,20 +90,20 @@ class OrderStatusUpdate(BaseModel):
 
 
 class PaymentSubmitIn(BaseModel):
-    method: str  # UPI / Bank Transfer / Cash / Other
+    method: str
     reference: str
     amount: float
     note: Optional[str] = ""
 
 
 class PaymentVerifyIn(BaseModel):
-    action: str  # verify | reject
+    action: str
     note: Optional[str] = ""
 
 
 # ---------- Notifications ----------
 class NotificationIn(BaseModel):
-    user_id: Optional[str] = None  # None means broadcast
+    user_id: Optional[str] = None
     title: str
     body: str
 
@@ -111,7 +116,7 @@ class ContentIn(BaseModel):
 
 # ---------- Messages ----------
 class MessageIn(BaseModel):
-    to_user_id: Optional[str] = None  # customer -> admin if None
+    to_user_id: Optional[str] = None
     body: str
 
 
