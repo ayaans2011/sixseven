@@ -402,7 +402,7 @@ function Profile() {
             if (!window.confirm("Delete your customer account permanently? You will be logged out and will need to create a new account to use customer login again.")) return;
             if (!window.confirm("This cannot be undone. Continue deleting your account?")) return;
             try {
-              await api.delete("/users/me");
+              await api.delete("/auth/users/me");
               localStorage.removeItem("zx_token");
               toast.success("Your account has been deleted");
               setTimeout(() => { window.location.href = "/"; }, 500);
