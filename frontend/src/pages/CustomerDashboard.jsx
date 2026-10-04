@@ -5,7 +5,7 @@ import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import { useAuth } from "@/lib/auth";
 import { toast } from "sonner";
-import { LayoutDashboard, FileText, ShoppingBag, MapPin, Bell, UserCircle, Download, Upload, Paperclip, Trash2 } from "lucide-react";
+import { LayoutDashboard, FileText, ShoppingBag, MapPin, Bell, UserCircle, Download, Upload, Paperclip, Trash2, MessageCircle } from "lucide-react";
 import MessagesThread from "@/components/MessagesThread";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -369,6 +369,61 @@ function Notifications() {
   );
 }
 
+
+function SupportTickets() {
+  const [items, setItems] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [form, setForm] = useState({ subject: "", message: "", priority: "normal" });
+  const [reply, setReply] = useState("");
+  const [busy, setBusy] = useState(false);
+  const load = () => api.get("/support/tickets/mine").then(r => setItems(r.data));
+  useEffect(() => { load(); }, []);
+  const create = async (e) => {
+    e.preventDefault(); setBusy(true);
+    try {
+      await api.post("/support/tickets", form);
+      toast.success("Support ticket created");
+      setForm({ subject: "", message: "", priority: "normal" }); load();
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
+    finally { setBusy(false); }
+  };
+  const sendReply = async () => {
+    if (!reply.trim() || !selected) return;
+    setBusy(true);
+    try { const {data}=await api.post(`/support/tickets/${selected.id}/replies`, {message: reply}); setSelected(data); setReply(""); load(); }
+    catch(e){ toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
+    finally { setBusy(false); }
+  };
+  return <div>
+    <h2 className="font-serif text-2xl font-bold text-[#0A1128]">Support Tickets</h2>
+    <form onSubmit={create} className="zx-card mt-4 space-y-3">
+      <input className="zx-input" placeholder="Subject" maxLength={160} value={form.subject} onChange={e=>setForm({...form,subject:e.target.value})} required />
+      <textarea className="zx-input" rows={4} placeholder="Describe your issue or question" maxLength={5000} value={form.message} onChange={e=>setForm({...form,message:e.target.value})} required />
+      <div className="flex flex-wrap gap-2 items-center">
+        <select className="zx-input max-w-xs" value={form.priority} onChange={e=>setForm({...form,priority:e.target.value})}>
+          <option value="low">Low priority</option><option value="normal">Normal priority</option><option value="high">High priority</option><option value="urgent">Urgent</option>
+        </select>
+        <button disabled={busy} className="zx-btn-primary">{busy ? "Submitting…" : "Create Ticket"}</button>
+      </div>
+    </form>
+    <div className="mt-6 space-y-3">
+      {items.map(t=><button key={t.id} onClick={()=>setSelected(t)} className="zx-card w-full text-left block hover:bg-[#F8F9FA]">
+        <div className="flex flex-wrap justify-between gap-2"><span className="font-semibold">{t.ticket_number} · {t.subject}</span><span className="text-xs uppercase text-[#6B7280]">{t.status.replace(/_/g," ")}</span></div>
+        <div className="text-xs text-[#6B7280] mt-1">Priority: {t.priority} · Updated {new Date(t.updated_at).toLocaleString()}</div>
+      </button>)}
+      {items.length===0 && <div className="text-sm text-[#6B7280]">No support tickets yet.</div>}
+    </div>
+    {selected && <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-40" onClick={()=>setSelected(null)}>
+      <div className="bg-white max-w-2xl w-full p-5 border max-h-[90vh] overflow-y-auto" onClick={e=>e.stopPropagation()}>
+        <div className="flex justify-between gap-3"><div><div className="text-xs uppercase text-[#00509E]">{selected.ticket_number}</div><h3 className="font-serif text-xl font-bold">{selected.subject}</h3></div><button onClick={()=>setSelected(null)}>✕</button></div>
+        <div className="mt-3 text-sm whitespace-pre-wrap">{selected.message}</div>
+        <div className="mt-4 space-y-2">{(selected.replies||[]).map(r=><div key={r.id} className="border border-[#E5E7EB] p-3 text-sm"><div className="text-xs font-semibold text-[#6B7280]">{r.role === "admin" ? "ZEROAXIS Support" : "You"} · {new Date(r.created_at).toLocaleString()}</div><div className="mt-1 whitespace-pre-wrap">{r.message}</div></div>)}</div>
+        {!["closed","resolved"].includes(selected.status) && <div className="mt-4 flex gap-2"><textarea className="zx-input" rows={2} placeholder="Reply to support" value={reply} onChange={e=>setReply(e.target.value)} /><button disabled={busy} onClick={sendReply} className="zx-btn-primary self-end">Reply</button></div>}
+      </div>
+    </div>}
+  </div>;
+}
+
 function Profile() {
   const { user, refresh } = useAuth();
   const [form, setForm] = useState({ name: user?.name || "", phone: user?.phone || "", address: user?.address || "", company: user?.company || "" });
@@ -421,6 +476,7 @@ export default function CustomerDashboard() {
     { to: "/dashboard", label: "Overview", icon: LayoutDashboard, end: true },
     { to: "/dashboard/enquiries", label: "My Enquiries", icon: FileText },
     { to: "/dashboard/orders", label: "My Orders", icon: ShoppingBag },
+    { to: "/dashboard/support", label: "Support Tickets", icon: MessageCircle },
     { to: "/dashboard/notifications", label: "Notifications", icon: Bell },
     { to: "/dashboard/profile", label: "Profile", icon: UserCircle },
   ];
@@ -443,6 +499,7 @@ export default function CustomerDashboard() {
             <Route index element={<Overview />} />
             <Route path="enquiries" element={<MyEnquiries />} />
             <Route path="orders" element={<MyOrders />} />
+            <Route path="support" element={<SupportTickets />} />
             <Route path="notifications" element={<Notifications />} />
             <Route path="profile" element={<Profile />} />
           </Routes>
