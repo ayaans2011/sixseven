@@ -181,3 +181,62 @@ body:has(.zx-sidebar) h2,
 body:has(.zx-sidebar) h3 {
   letter-spacing: -.01em;
 }
+
+/* Customer dashboard mobile layout */
+.customer-dashboard,
+.customer-dashboard > main,
+.customer-dashboard > aside {
+  min-width: 0;
+}
+.customer-dashboard .zx-card,
+.customer-dashboard form,
+.customer-dashboard .zx-input {
+  max-width: 100%;
+}
+.customer-dashboard .overflow-x-auto {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.customer-dashboard .zx-table {
+  min-width: 640px;
+}
+@media (max-width: 767px) {
+  .customer-dashboard {
+    width: 100%;
+    box-sizing: border-box;
+    padding-left: .75rem;
+    padding-right: .75rem;
+    gap: 1rem;
+  }
+  .customer-dashboard > aside {
+    width: 100%;
+  }
+  .customer-dashboard > aside nav {
+    width: 100%;
+  }
+  .customer-dashboard > aside nav a {
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .customer-dashboard main {
+    width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+  }
+  .customer-dashboard .grid.grid-cols-2 {
+    grid-template-columns: 1fr;
+  }
+  .customer-dashboard .zx-card {
+    overflow-wrap: anywhere;
+  }
+  .customer-dashboard .zx-table {
+    min-width: 640px;
+  }
+  .customer-dashboard .fixed > div {
+    max-width: calc(100vw - 1.5rem);
+    max-height: calc(100vh - 1.5rem);
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+}
