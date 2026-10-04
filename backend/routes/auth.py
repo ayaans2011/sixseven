@@ -1,7 +1,8 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Request, Response, Depends
 from bson import ObjectId
 import secrets
+import hashlib
 
 from database import get_db
 from security import (
@@ -10,6 +11,7 @@ from security import (
     check_lockout, record_failed_login, clear_login_attempts, audit_log,
 )
 from models import RegisterIn, LoginIn, ForgotPasswordIn, ResetPasswordIn
+from services.email import password_reset
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -90,30 +92,57 @@ async def forgot_password(data: ForgotPasswordIn):
     db = get_db()
     email = data.email.lower().strip()
     user = await db.users.find_one({"email": email})
-    # Do not disclose existence
+
+    # Do not disclose whether the account exists.
     if user:
+        # Invalidate any previous reset links for this account.
+        await db.password_reset_tokens.update_many(
+            {"user_id": str(user["_id"]), "used": False},
+            {"$set": {"used": True}},
+        )
+
         token = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=30)
+
         await db.password_reset_tokens.insert_one({
             "user_id": str(user["_id"]),
-            "token": token,
+            "token_hash": token_hash,
             "used": False,
-            "expires_at": datetime.now(timezone.utc).replace(microsecond=0),
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "expires_at": expires_at,
+            "created_at": datetime.now(timezone.utc),
         })
-        # In production: send via email. For now, expose in server logs.
-        print(f"[PASSWORD RESET] For {email}: token={token}")
-    return {"message": "If the email exists, a reset link has been generated."}
+
+        password_reset(
+            to_email=email,
+            name=user.get("name", ""),
+            reset_token=token,
+        )
+
+    return {"message": "If the email exists, a password reset link has been sent."}
 
 
 @router.post("/reset-password")
 async def reset_password(data: ResetPasswordIn):
     db = get_db()
-    rec = await db.password_reset_tokens.find_one({"token": data.token, "used": False})
+    token_hash = hashlib.sha256(data.token.encode("utf-8")).hexdigest()
+    rec = await db.password_reset_tokens.find_one({
+        "token_hash": token_hash,
+        "used": False,
+        "expires_at": {"$gt": datetime.now(timezone.utc)},
+    })
     if not rec:
-        raise HTTPException(status_code=400, detail="Invalid or expired token")
-    await db.users.update_one(
+        raise HTTPException(status_code=400, detail="Invalid or expired reset link")
+
+    result = await db.users.update_one(
         {"_id": ObjectId(rec["user_id"])},
-        {"$set": {"password_hash": hash_password(data.new_password)}}
+        {"$set": {"password_hash": hash_password(data.new_password)}},
     )
-    await db.password_reset_tokens.update_one({"_id": rec["_id"]}, {"$set": {"used": True}})
+    if result.matched_count != 1:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset link")
+
+    await db.password_reset_tokens.update_one(
+        {"_id": rec["_id"]},
+        {"$set": {"used": True}},
+    )
     return {"success": True}
