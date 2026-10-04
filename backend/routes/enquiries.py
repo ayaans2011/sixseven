@@ -95,7 +95,11 @@ async def create_enquiry_public(data: EnquiryIn):
     doc["_id"] = res.inserted_id
 
     await notify_user(customer_id, "Enquiry received", f"Your enquiry {number} has been received. Our team will review it and respond.", now=now.isoformat())
-    await notify_admins("New enquiry received", f"Enquiry {number} from {data.name.strip()} ({email})" + (f" about {doc.get('service_name')}." if doc.get("service_name") else "."))
+    admin_msg = f"Enquiry {number} from {data.name.strip()} ({email})" + (f" about {doc.get('service_name')}." if doc.get("service_name") else ".")
+    await notify_admins("New enquiry received", admin_msg)
+    admins = await db.users.find({"role": "admin", "disabled": {"$ne": True}}, {"email": 1}).to_list(1000)
+    for a in admins:
+        if a.get("email"): email_svc.admin_event(to_email=a["email"], event_title="New enquiry received", message=admin_msg)
     email_svc.enquiry_received(
         to_email=email, name=data.name.strip(),
         enquiry_number=number, service_name=doc.get("service_name"),
