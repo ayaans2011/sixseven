@@ -62,7 +62,12 @@ async def create_ticket(data: SupportTicketIn, user=Depends(get_current_user)):
     }
     res = await db.support_tickets.insert_one(doc)
     await notify_user(user["id"], "Support ticket created", f"Your support ticket {number} has been received. Our team will review it and respond.")
-    await notify_admins("New support ticket", f"{number} from {user.get('name') or user['email']}: {doc['subject']} ({data.priority} priority).")
+    admin_msg = f"{number} from {user.get('name') or user['email']}: {doc['subject']} ({data.priority} priority)."
+    await notify_admins("New support ticket", admin_msg)
+    admins = await db.users.find({"role": "admin", "disabled": {"$ne": True}}, {"email": 1}).to_list(1000)
+    for a in admins:
+        if a.get("email"):
+            email_svc.admin_event(to_email=a["email"], event_title="New support ticket", message=admin_msg)
     email_svc.support_ticket_created(
         to_email=user["email"], name=user.get("name", ""), ticket_number=number,
         subject=doc["subject"], priority=data.priority,
