@@ -74,7 +74,7 @@ async def verify_registration_otp(data: RegisterOtpIn, response: Response):
     set_auth_cookies(response, access, refresh)
     await audit_log("user_registered", uid, email, "user", uid)
     doc["_id"] = res.inserted_id
-    return _serialize_user(doc)
+    return {**_serialize_user(doc), "access_token": access}
 
 
 @router.post("/activate-account")
@@ -116,7 +116,7 @@ async def login(data: LoginIn, request: Request, response: Response):
     refresh = create_refresh_token(uid)
     set_auth_cookies(response, access, refresh)
     await audit_log("user_logged_in", uid, email, "user", uid)
-    return _serialize_user(user)
+    return {**_serialize_user(user), "access_token": access}
 
 
 @router.post("/logout")
