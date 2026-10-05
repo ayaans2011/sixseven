@@ -68,12 +68,13 @@ def clear_auth_cookies(response):
 
 
 def _extract_token(request: Request) -> str | None:
-    token = request.cookies.get("access_token")
-    if not token:
-        auth = request.headers.get("Authorization", "")
-        if auth.startswith("Bearer "):
-            token = auth[7:]
-    return token
+    # Prefer the explicit Authorization header. This keeps authenticated API
+    # requests working when browsers block cross-site cookies and prevents an
+    # old cookie from overriding a newer bearer token.
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        return auth[7:]
+    return request.cookies.get("access_token")
 
 
 async def get_current_user(request: Request) -> dict:
