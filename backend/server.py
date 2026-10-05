@@ -102,8 +102,6 @@ async def _seed_default_content():
 
 async def _seed_default_services():
     db = get_db()
-    if await db.services.count_documents({}) > 0:
-        return
     items = [
         {"name": "Website Development", "slug": "website-development","description": "Custom websites — corporate, portfolio, informational sites with clean design and reliable hosting guidance.","price": 2999, "category": "Web", "active": True},
         {"name": "Web Application Development", "slug": "web-application","description": "Full-stack web applications with authentication, database, admin panel and role-based access.","price": 8999, "category": "Web", "active": True},
@@ -113,9 +111,17 @@ async def _seed_default_services():
         {"name": "Technical Consulting", "slug": "consulting","description": "Advisory sessions on architecture, stack selection, security or project planning.","price": 500, "category": "Advisory", "active": True},
     ]
     now = datetime.now(timezone.utc).isoformat()
+    if await db.services.count_documents({}) == 0:
+        for it in items:
+            it["created_at"] = now
+        await db.services.insert_many(items)
+        return
+
     for it in items:
-        it["created_at"] = now
-    await db.services.insert_many(items)
+        await db.services.update_one(
+            {"slug": it["slug"]},
+            {"$set": {"price": it["price"]}},
+        )
 
 
 @app.on_event("startup")
