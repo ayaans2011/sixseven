@@ -25,8 +25,10 @@ export function AuthProvider({ children }) {
   const login = async (email, password) => {
     try {
       const { data } = await api.post("/auth/login", { email, password });
-      setUser(data);
-      return { ok: true, user: data };
+      if (data.access_token) localStorage.setItem("zx_token", data.access_token);
+      const { access_token, ...userData } = data;
+      setUser(userData);
+      return { ok: true, user: userData };
     } catch (e) {
       return { ok: false, error: formatApiErrorDetail(e.response?.data?.detail) || e.message };
     }
