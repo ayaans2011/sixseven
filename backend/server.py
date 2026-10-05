@@ -105,12 +105,12 @@ async def _seed_default_services():
     if await db.services.count_documents({}) > 0:
         return
     items = [
-        {"name": "Website Development", "slug": "website-development","description": "Custom websites — corporate, portfolio, informational sites with clean design and reliable hosting guidance.","price": 12000, "category": "Web", "active": True},
-        {"name": "Web Application Development", "slug": "web-application","description": "Full-stack web applications with authentication, database, admin panel and role-based access.","price": 35000, "category": "Web", "active": True},
-        {"name": "Mobile-Friendly Landing Page", "slug": "landing-page","description": "Single-page marketing website with contact form and mobile responsive design.","price": 5000, "category": "Web", "active": True},
-        {"name": "Bug Fixing & Maintenance", "slug": "bug-fix","description": "Fix bugs, patch issues and maintain existing websites or applications on a per-task basis.","price": 2500, "category": "Support", "active": True},
-        {"name": "Custom Software / Automation", "slug": "custom-software","description": "Automation scripts, custom tools and internal software tailored to specific business needs.","price": 20000, "category": "Software", "active": True},
-        {"name": "Technical Consulting", "slug": "consulting","description": "Advisory sessions on architecture, stack selection, security or project planning.","price": 3000, "category": "Advisory", "active": True},
+        {"name": "Website Development", "slug": "website-development","description": "Custom websites — corporate, portfolio, informational sites with clean design and reliable hosting guidance.","price": 2999, "category": "Web", "active": True},
+        {"name": "Web Application Development", "slug": "web-application","description": "Full-stack web applications with authentication, database, admin panel and role-based access.","price": 8999, "category": "Web", "active": True},
+        {"name": "Mobile-Friendly Landing Page", "slug": "landing-page","description": "Single-page marketing website with contact form and mobile responsive design.","price": 1999, "category": "Web", "active": True},
+        {"name": "Bug Fixing & Maintenance", "slug": "bug-fix","description": "Fix bugs, patch issues and maintain existing websites or applications on a per-task basis.","price": 1000, "category": "Support", "active": True},
+        {"name": "Custom Software / Automation", "slug": "custom-software","description": "Automation scripts, custom tools and internal software tailored to specific business needs.","price": 9999, "category": "Software", "active": True},
+        {"name": "Technical Consulting", "slug": "consulting","description": "Advisory sessions on architecture, stack selection, security or project planning.","price": 500, "category": "Advisory", "active": True},
     ]
     now = datetime.now(timezone.utc).isoformat()
     for it in items:
