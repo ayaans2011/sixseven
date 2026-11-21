@@ -261,6 +261,8 @@ async def toggle_customer(uid: str, admin=Depends(require_admin)):
         raise HTTPException(status_code=404, detail="Not found")
     if not u or u.get("role") != "customer":
         raise HTTPException(status_code=404, detail="Not found")
+    if u.get("account_status") == "deleted":
+        raise HTTPException(status_code=409, detail="Deleted customer accounts cannot be re-enabled.")
     new_state = not u.get("disabled", False)
     await db.users.update_one({"_id": u["_id"]}, {"$set": {"disabled": new_state}})
     await audit_log("customer_toggled", admin["id"], admin["email"], "user", uid, {"disabled": new_state})
