@@ -220,6 +220,7 @@ function PaymentForm({ orderId, amount, onDone }) {
   const [payment, setPayment] = useState(null);
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [visible, setVisible] = useState(true);
 
   useEffect(() => {
     api.get("/orders/" + orderId + "/payment/status").then(({ data }) => {
@@ -233,7 +234,6 @@ function PaymentForm({ orderId, amount, onDone }) {
     try {
       const { data } = await api.post("/orders/" + orderId + "/payment/create");
       setPayment(data);
-      toast.success("Secure UPI checkout created");
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
     finally { setBusy(false); }
   };
@@ -247,7 +247,7 @@ function PaymentForm({ orderId, amount, onDone }) {
         onDone && onDone();
       } else if (data.status === "expired") {
         setPayment(null);
-        toast.error("Payment session expired. Create a new checkout.");
+        toast.error("Payment session expired. Please create a new payment session.");
       } else {
         toast.info("Payment is still awaiting confirmation");
       }
@@ -255,49 +255,73 @@ function PaymentForm({ orderId, amount, onDone }) {
     finally { setChecking(false); }
   };
 
+  if (!visible) return null;
+
   return (
-    <section className="mt-4 overflow-hidden rounded-xl border border-[#DCE3EC] bg-white shadow-sm" data-testid={"payment-form-" + orderId}>
-      <div className="border-b border-[#E5E7EB] bg-[#F8F9FA] px-4 py-3 flex items-center justify-between gap-3">
-        <div>
-          <div className="text-xs font-semibold uppercase tracking-wider text-[#6B7280]">Secure checkout</div>
-          <div className="mt-0.5 text-sm font-semibold text-[#0A1128]">FamGateway · UPI payment</div>
-        </div>
-        <span className="zx-badge zx-badge-blue">Protected</span>
-      </div>
-      <div className="p-4 space-y-4">
-        <div className="flex items-end justify-between gap-3">
-          <div className="text-sm text-[#4B5563]">Amount payable</div>
-          <div className="font-serif text-2xl font-bold text-[#0A1128]">₹{Number(payment?.payable_amount || amount).toLocaleString("en-IN")}</div>
-        </div>
-        {!payment ? (
-          <button type="button" disabled={busy} onClick={createCheckout} className="zx-btn-primary w-full justify-center" data-testid={"payment-submit-" + orderId}>
-            {busy ? "Preparing secure checkout…" : "Continue to UPI payment"}
-          </button>
-        ) : (
-          <div className="space-y-4">
-            {payment.upi_intent ? (
-              <div className="rounded-lg border border-[#DCE3EC] bg-[#F8F9FA] p-4">
-                <div className="text-sm font-semibold text-[#0A1128]">Pay directly in your UPI app</div>
-                <p className="mt-1 text-xs leading-5 text-[#6B7280]">Choose Open UPI app to continue. A QR code is not needed for this payment method.</p>
-                <a className="zx-btn-primary mt-3 w-full justify-center inline-flex" href={payment.upi_intent}>Open UPI app</a>
-              </div>
-            ) : payment.qr_url ? (
-              <div className="rounded-lg border border-[#E5E7EB] bg-[#F8F9FA] p-4 text-center">
-                <div className="text-sm font-semibold text-[#0A1128] mb-3">Scan to pay</div>
-                <img src={payment.qr_url} alt="Dynamic payment QR" className="mx-auto w-40 h-40 object-contain bg-white rounded-lg border border-[#E5E7EB] p-1" />
-              </div>
-            ) : null}
-            {payment.checkout_url && <a className="zx-btn-outline w-full justify-center inline-flex" href={payment.checkout_url} target="_blank" rel="noreferrer">Other payment options</a>}
-            <div className="rounded-lg border border-[#E5E7EB] p-3">
-              <div className="text-xs text-[#6B7280]">Payment reference</div>
-              <div className="mt-0.5 text-sm font-semibold text-[#0A1128] break-all">{payment.order_id}</div>
-              <button type="button" className="zx-btn-outline mt-3 w-full justify-center" onClick={checkStatus} disabled={checking}>{checking ? "Checking payment…" : "I have paid — check status"}</button>
-            </div>
-            <p className="text-xs leading-5 text-[#6B7280]">This checkout expires after approximately 5 minutes. Your order is marked paid only after provider verification.</p>
+    <div className="fixed inset-0 z-[70] bg-[#0A1128]/55 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5" onClick={e=>e.stopPropagation()} data-testid={"payment-form-" + orderId}>
+      <section className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl border border-[#DCE3EC] bg-white shadow-2xl">
+        <div className="border-b border-[#E5E7EB] bg-[#F8F9FA] px-5 py-4 flex items-start justify-between gap-3">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#6B7280]">ZEROAXIS · Secure payment</div>
+            <h3 className="mt-1 font-serif text-xl font-bold text-[#0A1128]">Choose how to pay</h3>
+            <p className="mt-1 text-xs text-[#6B7280]">Order {orderId}</p>
           </div>
-        )}
-      </div>
-    </section>
+          <button type="button" onClick={()=>setVisible(false)} className="rounded-full border border-[#DCE3EC] px-3 py-1.5 text-sm text-[#4B5563] hover:bg-white" aria-label="Close payment window">Close</button>
+        </div>
+        <div className="p-5 space-y-4">
+          <div className="rounded-xl border border-[#DCE3EC] bg-[#F8F9FA] p-4 flex items-center justify-between gap-3">
+            <div>
+              <div className="text-xs text-[#6B7280]">Total amount</div>
+              <div className="mt-1 text-sm font-semibold text-[#0A1128]">Order payment</div>
+            </div>
+            <div className="font-serif text-2xl font-bold text-[#0A1128]">₹{Number(payment?.payable_amount || amount).toLocaleString("en-IN")}</div>
+          </div>
+
+          {!payment ? (
+            <div className="space-y-3">
+              <div className="text-sm font-semibold text-[#0A1128]">UPI payment options</div>
+              <div className="rounded-xl border border-[#E5E7EB] p-4 flex items-center gap-3">
+                <div className="h-11 w-11 rounded-lg bg-[#F1F5F9] flex items-center justify-center text-[#00509E] font-bold">UPI</div>
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-[#0A1128]">Pay with any UPI app</div>
+                  <div className="text-xs text-[#6B7280] mt-0.5">Google Pay, PhonePe, Paytm, BHIM and supported UPI apps</div>
+                </div>
+              </div>
+              <button type="button" disabled={busy} onClick={createCheckout} className="zx-btn-primary w-full justify-center" data-testid={"payment-submit-" + orderId}>
+                {busy ? "Loading payment options…" : "Continue with UPI"}
+              </button>
+              <p className="text-xs text-center text-[#6B7280]">Payment options will open here. No QR code is shown for direct UPI app payments.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {payment.upi_intent && (
+                <div className="rounded-xl border border-[#DCE3EC] p-4">
+                  <div className="text-sm font-semibold text-[#0A1128]">Open your UPI app</div>
+                  <p className="mt-1 text-xs leading-5 text-[#6B7280]">Continue to your preferred installed UPI app. The payment amount and merchant details will be passed through the UPI link.</p>
+                  <a className="zx-btn-primary mt-3 w-full justify-center inline-flex" href={payment.upi_intent}>Choose UPI app</a>
+                </div>
+              )}
+              {!payment.upi_intent && payment.checkout_url && (
+                <a className="zx-btn-primary w-full justify-center inline-flex" href={payment.checkout_url} target="_blank" rel="noreferrer">Open secure payment options</a>
+              )}
+              {!payment.upi_intent && !payment.checkout_url && payment.qr_url && (
+                <div className="rounded-xl border border-[#E5E7EB] p-4 text-center">
+                  <div className="text-sm font-semibold text-[#0A1128] mb-3">Alternative QR payment</div>
+                  <img src={payment.qr_url} alt="Payment QR fallback" className="mx-auto w-40 h-40 object-contain bg-white rounded-lg border border-[#E5E7EB] p-1" />
+                </div>
+              )}
+              {payment.checkout_url && payment.upi_intent && <a className="zx-btn-outline w-full justify-center inline-flex" href={payment.checkout_url} target="_blank" rel="noreferrer">More payment methods</a>}
+              <div className="rounded-xl border border-[#E5E7EB] p-3">
+                <div className="text-xs text-[#6B7280]">Payment reference</div>
+                <div className="mt-1 text-sm font-semibold text-[#0A1128] break-all">{payment.order_id}</div>
+                <button type="button" className="zx-btn-outline mt-3 w-full justify-center" onClick={checkStatus} disabled={checking}>{checking ? "Checking payment…" : "I have paid — check status"}</button>
+              </div>
+              <p className="text-xs leading-5 text-[#6B7280]">Payment is marked complete only after verification from the payment provider.</p>
+            </div>
+          )}
+        </div>
+      </section>
+    </div>
   );
 }
 
