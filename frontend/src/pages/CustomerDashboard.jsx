@@ -92,7 +92,7 @@ async function downloadInvoice(orderId, orderNumber) {
 
 function StatusBadge({ status, type = "order" }) {
   const map = {
-    UNPAID: "gray", PAYMENT_SUBMITTED: "amber", PENDING_VERIFICATION: "amber", PAYMENT_PENDING: "amber", PAYMENT_PENDING: "amber",
+    UNPAID: "gray", PAYMENT_SUBMITTED: "amber", PENDING_VERIFICATION: "amber", PAYMENT_PENDING: "amber",
     PAYMENT_VERIFIED: "green", PAYMENT_REJECTED: "red", REFUNDED: "gray",
     CREATED: "blue", WORK_STARTED: "blue", IN_PROGRESS: "blue",
     READY_FOR_DELIVERY: "amber", COMPLETED: "green", CANCELLED: "red",
@@ -110,7 +110,7 @@ function Overview() {
     api.get("/notifications").then(r => setNotifs(r.data));
   }, []);
   const active = orders.filter(o => !["COMPLETED","CANCELLED"].includes(o.order_status));
-  const pending = orders.filter(o => o.payment_status === "PENDING_VERIFICATION");
+  const pending = orders.filter(o => ["PENDING_VERIFICATION", "PAYMENT_PENDING"].includes(o.payment_status));
   const completed = orders.filter(o => o.order_status === "COMPLETED");
   const unread = notifs.filter(n => !n.read).length;
   const cards = [
