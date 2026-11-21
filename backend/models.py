@@ -7,7 +7,7 @@ from datetime import datetime
 class RegisterIn(BaseModel):
     name: str = Field(min_length=2, max_length=80)
     email: EmailStr
-    password: str = Field(min_length=6, max_length=128)
+    password: str = Field(min_length=8, max_length=128)
     phone: Optional[str] = None
 
 
@@ -23,7 +23,7 @@ class ForgotPasswordIn(BaseModel):
 class ResetPasswordIn(BaseModel):
     token: str
     otp: str = Field(min_length=6, max_length=6)
-    new_password: str = Field(min_length=6, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
 
 
 class RegisterOtpIn(BaseModel):
