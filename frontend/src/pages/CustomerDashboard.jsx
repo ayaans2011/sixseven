@@ -256,26 +256,48 @@ function PaymentForm({ orderId, amount, onDone }) {
   };
 
   return (
-    <div className="space-y-3 mt-3" data-testid={"payment-form-" + orderId}>
-      <div className="text-sm text-[#4B5563]">Pay securely through FamGateway. The amount is fixed to the order total.</div>
-      <div className="text-sm font-semibold text-[#0A1128]">Amount to pay: ₹{Number(payment?.payable_amount || amount).toLocaleString("en-IN")}</div>
-      {!payment ? (
-        <button type="button" disabled={busy} onClick={createCheckout} className="zx-btn-primary" data-testid={"payment-submit-" + orderId}>
-          {busy ? "Creating checkout…" : "Continue to UPI payment"}
-        </button>
-      ) : (
-        <div className="border border-[#E5E7EB] p-3 bg-[#F8F9FA] space-y-3">
-          {payment.qr_url && <img src={payment.qr_url} alt="Dynamic payment QR" className="w-40 h-40 object-contain bg-white border border-[#E5E7EB] p-1" />}
-          <div className="text-xs text-[#4B5563]">Payment reference: <b>{payment.order_id}</b></div>
-          <div className="flex flex-wrap gap-2">
-            {payment.upi_intent && <a className="zx-btn-primary inline-flex items-center" href={payment.upi_intent}>Open UPI app</a>}
-            {payment.checkout_url && <a className="zx-btn-outline inline-flex items-center" href={payment.checkout_url} target="_blank" rel="noreferrer">Other payment options</a>}
-            <button type="button" className="zx-btn-outline" onClick={checkStatus} disabled={checking}>{checking ? "Checking…" : "I have paid — check status"}</button>
-          </div>
-          <div className="text-xs text-[#6B7280]">This payment session expires after approximately 5 minutes. Payment is marked complete only after provider verification.</div>
+    <section className="mt-4 overflow-hidden rounded-xl border border-[#DCE3EC] bg-white shadow-sm" data-testid={"payment-form-" + orderId}>
+      <div className="border-b border-[#E5E7EB] bg-[#F8F9FA] px-4 py-3 flex items-center justify-between gap-3">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wider text-[#6B7280]">Secure checkout</div>
+          <div className="mt-0.5 text-sm font-semibold text-[#0A1128]">FamGateway · UPI payment</div>
         </div>
-      )}
-    </div>
+        <span className="zx-badge zx-badge-blue">Protected</span>
+      </div>
+      <div className="p-4 space-y-4">
+        <div className="flex items-end justify-between gap-3">
+          <div className="text-sm text-[#4B5563]">Amount payable</div>
+          <div className="font-serif text-2xl font-bold text-[#0A1128]">₹{Number(payment?.payable_amount || amount).toLocaleString("en-IN")}</div>
+        </div>
+        {!payment ? (
+          <button type="button" disabled={busy} onClick={createCheckout} className="zx-btn-primary w-full justify-center" data-testid={"payment-submit-" + orderId}>
+            {busy ? "Preparing secure checkout…" : "Continue to UPI payment"}
+          </button>
+        ) : (
+          <div className="space-y-4">
+            {payment.upi_intent ? (
+              <div className="rounded-lg border border-[#DCE3EC] bg-[#F8F9FA] p-4">
+                <div className="text-sm font-semibold text-[#0A1128]">Pay directly in your UPI app</div>
+                <p className="mt-1 text-xs leading-5 text-[#6B7280]">Choose Open UPI app to continue. A QR code is not needed for this payment method.</p>
+                <a className="zx-btn-primary mt-3 w-full justify-center inline-flex" href={payment.upi_intent}>Open UPI app</a>
+              </div>
+            ) : payment.qr_url ? (
+              <div className="rounded-lg border border-[#E5E7EB] bg-[#F8F9FA] p-4 text-center">
+                <div className="text-sm font-semibold text-[#0A1128] mb-3">Scan to pay</div>
+                <img src={payment.qr_url} alt="Dynamic payment QR" className="mx-auto w-40 h-40 object-contain bg-white rounded-lg border border-[#E5E7EB] p-1" />
+              </div>
+            ) : null}
+            {payment.checkout_url && <a className="zx-btn-outline w-full justify-center inline-flex" href={payment.checkout_url} target="_blank" rel="noreferrer">Other payment options</a>}
+            <div className="rounded-lg border border-[#E5E7EB] p-3">
+              <div className="text-xs text-[#6B7280]">Payment reference</div>
+              <div className="mt-0.5 text-sm font-semibold text-[#0A1128] break-all">{payment.order_id}</div>
+              <button type="button" className="zx-btn-outline mt-3 w-full justify-center" onClick={checkStatus} disabled={checking}>{checking ? "Checking payment…" : "I have paid — check status"}</button>
+            </div>
+            <p className="text-xs leading-5 text-[#6B7280]">This checkout expires after approximately 5 minutes. Your order is marked paid only after provider verification.</p>
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -293,19 +315,34 @@ function MyOrders() {
         <h2 className="font-serif text-2xl font-bold text-[#0A1128]">My Orders</h2>
       </div>
       <NewOrder onCreated={load} />
-      <div className="overflow-x-auto mt-6"><table className="zx-table" data-testid="my-orders-table"><thead><tr><th>Order</th><th>Service</th><th>Amount</th><th>Payment</th><th>Status</th><th></th></tr></thead><tbody>
+      <div className="mt-6 flex items-center justify-between gap-3">
+        <div>
+          <h3 className="font-serif text-lg font-bold text-[#0A1128]">Order history</h3>
+          <p className="text-xs text-[#6B7280] mt-0.5">Track payments and project progress in one place</p>
+        </div>
+        <span className="zx-badge zx-badge-gray">{orders.length} total</span>
+      </div>
+      <div className="mt-3 space-y-3" data-testid="my-orders-table">
         {orders.map(o => (
-          <tr key={o.id}>
-            <td>{o.order_number}</td>
-            <td>{o.service_name}</td>
-            <td>₹{Number(o.amount).toLocaleString('en-IN')}</td>
-            <td><StatusBadge status={o.payment_status} /></td>
-            <td><StatusBadge status={o.order_status} /></td>
-            <td><button onClick={()=>openDetail(o.id)} className="zx-link text-sm" data-testid={`view-order-${o.order_number}`}>View</button></td>
-          </tr>
+          <article key={o.id} className="rounded-xl border border-[#DCE3EC] bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-xs font-semibold uppercase tracking-wider text-[#6B7280]">{o.order_number}</div>
+                <div className="mt-1 font-semibold text-[#0A1128]">{o.service_name}</div>
+              </div>
+              <div className="font-serif text-xl font-bold text-[#0A1128]">₹{Number(o.amount).toLocaleString('en-IN')}</div>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <StatusBadge status={o.payment_status} />
+              <StatusBadge status={o.order_status} />
+            </div>
+            <div className="mt-3 flex justify-end border-t border-[#E5E7EB] pt-3">
+              <button onClick={()=>openDetail(o.id)} className="zx-btn-outline text-sm" data-testid={`view-order-${o.order_number}`}>View order details</button>
+            </div>
+          </article>
         ))}
-        {orders.length===0 && <tr><td colSpan="6" className="text-center text-[#6B7280] py-6">No orders yet.</td></tr>}
-      </tbody></table></div>
+        {orders.length===0 && <div className="rounded-xl border border-dashed border-[#CBD5E1] bg-white py-10 text-center text-sm text-[#6B7280]">No orders yet. Your orders will appear here.</div>}
+      </div>
 
       {selected && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-40" onClick={()=>setSelected(null)}>
