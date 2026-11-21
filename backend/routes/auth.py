@@ -108,7 +108,7 @@ async def login(data: LoginIn, request: Request, response: Response):
     if not user or not verify_password(data.password, user.get("password_hash", "")):
         await record_failed_login(identifier)
         raise HTTPException(status_code=401, detail="Invalid email or password")
-    if user.get("disabled"):
+    if user.get("disabled") or user.get("account_status") == "deleted":
         raise HTTPException(status_code=403, detail="Account disabled")
     if user.get("role") == "admin":
         raise HTTPException(status_code=403, detail="Use the dedicated admin login")
