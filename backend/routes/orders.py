@@ -378,6 +378,8 @@ async def famgateway_webhook(request: Request):
 async def update_status(oid: str, data: OrderStatusUpdate, admin=Depends(require_admin)):
     if data.order_status not in ORDER_STATUSES:
         raise HTTPException(status_code=400, detail="Invalid status")
+    if data.order_status in {"PAYMENT_PENDING", "PAYMENT_SUBMITTED", "PENDING_VERIFICATION", "PAYMENT_VERIFIED"}:
+        raise HTTPException(status_code=400, detail="Payment states are managed only by verified payment-provider events.")
     db = get_db()
     try:
         o = await db.orders.find_one({"_id": ObjectId(oid)})
