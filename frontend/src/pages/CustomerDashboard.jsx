@@ -353,6 +353,7 @@ function MyOrders() {
               <div className="min-w-0">
                 <div className="text-xs font-semibold uppercase tracking-wider text-[#6B7280]">{o.order_number}</div>
                 <div className="mt-1 font-semibold text-[#0A1128]">{o.service_name}</div>
+                <div className="mt-1 text-xs text-[#6B7280]">Tracking token: <span className="font-mono break-all">{o.tracking_number}</span></div>
               </div>
               <div className="font-serif text-xl font-bold text-[#0A1128]">₹{Number(o.amount).toLocaleString('en-IN')}</div>
             </div>
@@ -376,6 +377,7 @@ function MyOrders() {
                 <div className="text-xs uppercase text-[#00509E] font-semibold">Order</div>
                 <div className="font-serif text-xl font-bold text-[#0A1128]">{selected.order_number}</div>
                 <div className="text-sm text-[#4B5563]">{selected.service_name}</div>
+                <div className="mt-1 text-xs text-[#6B7280]">Tracking token: <span className="font-mono break-all select-all">{selected.tracking_number}</span></div>
               </div>
               <button onClick={()=>setSelected(null)} className="text-[#4B5563]">✕</button>
             </div>
