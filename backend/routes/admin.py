@@ -131,6 +131,7 @@ async def get_customer_record(uid: str, admin=Depends(require_admin)):
     enquiries_raw = await db.enquiries.find(enquiry_query).sort("created_at", -1).to_list(500)
     order_ids = [str(o["_id"]) for o in orders_raw]
     enquiry_ids = [str(e["_id"]) for e in enquiries_raw]
+    order_history = await db.order_status_history.find({"order_id": {"$in": order_ids}}).sort("timestamp", -1).to_list(1000)
     payments = []
     for order in orders_raw:
         rows = await db.payments.find({"order_id": str(order["_id"])}).sort("created_at", -1).to_list(100)
@@ -140,12 +141,13 @@ async def get_customer_record(uid: str, admin=Depends(require_admin)):
                 "order_number": order.get("order_number"),
                 "method": p.get("method"), "reference": p.get("reference"),
                 "amount": p.get("amount"), "status": p.get("status"),
-                "provider_order_id": p.get("provider_order_id"),
+                "provider": p.get("provider"), "provider_order_id": p.get("provider_order_id"),
+                "order_amount": p.get("order_amount"), "verified_by": p.get("verified_by"),
                 "created_at": p.get("created_at"), "verified_at": p.get("verified_at"),
             })
     support = await db.support_tickets.find({"customer_id": uid}).sort("created_at", -1).to_list(300)
     notifications = await db.notifications.find({"user_id": uid}).sort("created_at", -1).to_list(300)
-    files = await db.files.find({"parent_id": {"$in": order_ids + enquiry_ids}, "deleted": {"$ne": True}}).sort("created_at", -1).to_list(500)
+    files = await db.files.find({"parent_id": {"$in": order_ids + enquiry_ids}, "is_deleted": {"$ne": True}}).sort("created_at", -1).to_list(500)
     messages = await db.messages.find({"parent_id": {"$in": order_ids + enquiry_ids}}).sort("created_at", -1).to_list(500)
     audits = await db.audit_logs.find({"target_id": uid}).sort("timestamp", -1).to_list(200)
 
@@ -160,6 +162,7 @@ async def get_customer_record(uid: str, admin=Depends(require_admin)):
     orders = [{
         "id": str(o["_id"]), "order_number": o.get("order_number"),
         "service_name": o.get("service_name"), "amount": o.get("amount", 0),
+        "requirement": o.get("requirement"), "notes": o.get("notes"),
         "payment_status": o.get("payment_status"), "order_status": o.get("order_status"),
         "created_at": o.get("created_at"), "updated_at": o.get("updated_at"),
     } for o in orders_raw]
@@ -198,6 +201,11 @@ async def get_customer_record(uid: str, admin=Depends(require_admin)):
     await audit_log("customer_record_viewed", admin["id"], admin["email"], "user", uid)
     return {
         "customer": profile, "orders": orders, "payments": payments,
+        "order_history": [{
+            "order_id": h.get("order_id"), "from_status": h.get("from_status"),
+            "to_status": h.get("to_status"), "note": h.get("note"),
+            "actor_email": h.get("actor_email"), "timestamp": h.get("timestamp"),
+        } for h in order_history],
         "enquiries": enquiries, "support_tickets": support_rows,
         "attachments": file_rows, "messages": message_rows,
         "notifications": notification_rows, "audit_history": audit_rows,
