@@ -20,7 +20,10 @@ LOCKOUT_MINUTES = 15
 
 
 def get_jwt_secret() -> str:
-    return os.environ["JWT_SECRET"]
+    secret = os.environ.get("JWT_SECRET", "")
+    if len(secret) < 32:
+        raise RuntimeError("JWT_SECRET must be configured with at least 32 characters.")
+    return secret
 
 
 def hash_password(password: str) -> str:

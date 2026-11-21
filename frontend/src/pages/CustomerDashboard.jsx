@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { NavLink, Route, Routes, useNavigate } from "react-router-dom";
 import api, { formatApiErrorDetail } from "@/lib/api";
 import Header from "@/components/Header";
@@ -21,7 +21,9 @@ function FileAttachments({ parentType, parentId }) {
   const [files, setFiles] = useState([]);
   const [busy, setBusy] = useState(false);
   const load = () => api.get(`/files/list?parent_type=${parentType}&parent_id=${parentId}`).then(r=>setFiles(r.data)).catch(()=>{});
-  useEffect(()=>{ if(parentId) load(); /* eslint-disable-next-line */ }, [parentId]);
+  // Reload attachments when the parent record changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(()=>{ if(parentId) load(); }, [parentId, parentType]);
   const upload = async (e) => {
     const f = e.target.files?.[0]; if (!f) return;
     if (f.size > 10 * 1024 * 1024) return toast.error("Max 10 MB per file");
@@ -221,11 +223,16 @@ function PaymentForm({ orderId, amount, onDone }) {
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
   const [visible, setVisible] = useState(true);
+  const onDoneRef = useRef(onDone);
+
+  useEffect(() => {
+    onDoneRef.current = onDone;
+  }, [onDone]);
 
   useEffect(() => {
     api.get("/orders/" + orderId + "/payment/status").then(({ data }) => {
       if (data.checkout) setPayment(data.checkout);
-      if (data.status === "success") onDone && onDone();
+      if (data.status === "success") onDoneRef.current?.();
     }).catch(() => {});
   }, [orderId]);
 
@@ -353,6 +360,7 @@ function MyOrders() {
               <div className="min-w-0">
                 <div className="text-xs font-semibold uppercase tracking-wider text-[#6B7280]">{o.order_number}</div>
                 <div className="mt-1 font-semibold text-[#0A1128]">{o.service_name}</div>
+                <div className="mt-1 text-xs text-[#6B7280]">Tracking token: <span className="font-mono break-all">{o.tracking_number}</span></div>
               </div>
               <div className="font-serif text-xl font-bold text-[#0A1128]">₹{Number(o.amount).toLocaleString('en-IN')}</div>
             </div>
@@ -376,6 +384,7 @@ function MyOrders() {
                 <div className="text-xs uppercase text-[#00509E] font-semibold">Order</div>
                 <div className="font-serif text-xl font-bold text-[#0A1128]">{selected.order_number}</div>
                 <div className="text-sm text-[#4B5563]">{selected.service_name}</div>
+                <div className="mt-1 text-xs text-[#6B7280]">Tracking token: <span className="font-mono break-all select-all">{selected.tracking_number}</span></div>
               </div>
               <button onClick={()=>setSelected(null)} className="text-[#4B5563]">✕</button>
             </div>

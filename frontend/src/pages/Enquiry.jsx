@@ -18,7 +18,9 @@ function EnquiryAttachments({ enquiryId, canManage }) {
   const [files, setFiles] = useState([]);
   const [busy, setBusy] = useState(false);
   const load = () => api.get(`/files/list?parent_type=enquiry&parent_id=${enquiryId}`).then(r=>setFiles(r.data)).catch(()=>{});
-  useEffect(()=>{ if(canManage) load(); /* eslint-disable-next-line */ }, [enquiryId, canManage]);
+  // Load attachments only for the current enquiry when the customer can manage them.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(()=>{ if(canManage) load(); }, [enquiryId, canManage]);
   const upload = async (e) => {
     const f = e.target.files?.[0]; if (!f) return;
     if (f.size > 10 * 1024 * 1024) return toast.error("Max 10 MB");

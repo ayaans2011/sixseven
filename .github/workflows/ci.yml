@@ -1,0 +1,62 @@
+name: ZEROAXIS checks
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        run: python -m pip install -r requirements.txt
+        working-directory: backend
+      - name: Compile backend
+        run: python -m compileall -q .
+        working-directory: backend
+      - name: Run backend tests
+        run: pytest -q
+        working-directory: backend
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+      - name: Apply non-breaking npm security updates
+        run: npm audit fix
+        working-directory: frontend
+      - name: Commit updated lockfile to pull request
+        if: github.event_name == 'pull_request'
+        run: |
+          if ! git diff --quiet -- frontend/package-lock.json; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add frontend/package-lock.json
+            git commit -m "Apply non-breaking frontend dependency security updates"
+            git push origin "HEAD:${GITHUB_HEAD_REF}"
+          fi
+      - name: Audit production frontend dependencies
+        run: npm audit --omit=dev --audit-level=high
+        working-directory: frontend
+      - name: Build frontend
+        run: npm run build
+        working-directory: frontend

@@ -29,13 +29,23 @@ logger = logging.getLogger("zeroaxis")
 
 app = FastAPI(title="ZEROAXIS API", version="1.0")
 
+default_cors_origins = "https://zeroaxis.in,https://www.zeroaxis.in,https://sixseven-frontend.onrender.com"
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=[origin.strip() for origin in os.environ.get("CORS_ORIGINS", "https://sixseven-frontend.onrender.com").split(",") if origin.strip()],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=[origin.strip() for origin in os.environ.get("CORS_ORIGINS", default_cors_origins).split(",") if origin.strip()],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
+
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    return response
 
 app.include_router(auth_router)
 app.include_router(admin_auth_router)
@@ -61,6 +71,9 @@ async def health():
 
 
 async def _seed_admin(email: str, password: str, name: str):
+    if not email or not password:
+        logger.warning("Admin bootstrap skipped: ADMIN_EMAIL and ADMIN_PASSWORD must both be configured.")
+        return
     db = get_db()
     email = email.lower().strip()
     existing = await db.users.find_one({"email": email})
@@ -72,16 +85,21 @@ async def _seed_admin(email: str, password: str, name: str):
             "role": "admin",
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
-        logger.info(f"Seeded admin: {email}")
-    else:
-        updates = {}
-        if not verify_password(password, existing["password_hash"]):
-            updates["password_hash"] = hash_password(password)
-        if existing.get("role") != "admin":
-            updates["role"] = "admin"
-        if updates:
-            await db.users.update_one({"_id": existing["_id"]}, {"$set": updates})
-            logger.info(f"Updated admin: {email}")
+        logger.info("Created configured administrator account.")
+        return
+
+    # Never promote a customer account to administrator during application startup.
+    if existing.get("role") != "admin":
+        logger.error("Configured admin email belongs to a non-admin account; refusing automatic role promotion.")
+        return
+
+    # Only an explicitly configured secret may rotate an existing admin password.
+    if not verify_password(password, existing.get("password_hash", "")):
+        await db.users.update_one(
+            {"_id": existing["_id"]},
+            {"$set": {"password_hash": hash_password(password)}},
+        )
+        logger.info("Rotated password for the configured administrator account.")
 
 
 async def _seed_default_content():
@@ -111,16 +129,12 @@ async def _seed_default_services():
         {"name": "Technical Consulting", "slug": "consulting","description": "Advisory sessions on architecture, stack selection, security or project planning.","price": 500, "category": "Advisory", "active": True},
     ]
     now = datetime.now(timezone.utc).isoformat()
-    if await db.services.count_documents({}) == 0:
-        for it in items:
-            it["created_at"] = now
-        await db.services.insert_many(items)
-        return
-
+    # Seed missing services only. Never overwrite prices or settings changed by an admin.
     for it in items:
         await db.services.update_one(
             {"slug": it["slug"]},
-            {"$set": {"price": it["price"]}},
+            {"$setOnInsert": {**it, "created_at": now}},
+            upsert=True,
         )
 
 
@@ -136,11 +150,19 @@ async def startup():
             logger.warning("Object storage not initialized — file uploads will 503 until fixed")
     except Exception as e:
         logger.error(f"Storage init error: {e}")
-    await _seed_admin(os.environ.get("ADMIN_EMAIL", "admin@zeroaxis.in"), os.environ.get("ADMIN_PASSWORD", "admin123"), "Zeroaxis Admin")
-    owner_email = os.environ.get("OWNER_EMAIL")
-    owner_password = os.environ.get("OWNER_PASSWORD")
+    admin_email = os.environ.get("ADMIN_EMAIL", "").strip()
+    admin_password = os.environ.get("ADMIN_PASSWORD", "")
+    if admin_email and admin_password:
+        await _seed_admin(admin_email, admin_password, "Zeroaxis Admin")
+    else:
+        logger.warning("No ADMIN_EMAIL/ADMIN_PASSWORD configured; no administrator will be bootstrapped.")
+
+    owner_email = os.environ.get("OWNER_EMAIL", "").strip()
+    owner_password = os.environ.get("OWNER_PASSWORD", "")
     if owner_email and owner_password:
-        await _seed_admin(owner_email, owner_password, "Ayaan (Owner)")
+        await _seed_admin(owner_email, owner_password, "ZEROAXIS Owner")
+    elif owner_email or owner_password:
+        logger.error("OWNER_EMAIL and OWNER_PASSWORD must be configured together; owner bootstrap skipped.")
     await _seed_default_content()
     await _seed_default_services()
     logger.info("ZEROAXIS backend started")

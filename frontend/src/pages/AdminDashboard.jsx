@@ -20,7 +20,9 @@ function FileAttachments({ parentType, parentId }) {
   const [files, setFiles] = useState([]);
   const [busy, setBusy] = useState(false);
   const load = () => api.get(`/files/list?parent_type=${parentType}&parent_id=${parentId}`).then(r=>setFiles(r.data)).catch(()=>{});
-  useEffect(()=>{ if(parentId) load(); /* eslint-disable-next-line */ }, [parentId]);
+  // Reload attachments when the parent record changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(()=>{ if(parentId) load(); }, [parentId, parentType]);
   const upload = async (e) => {
     const f = e.target.files?.[0]; if (!f) return;
     if (f.size > 10 * 1024 * 1024) return toast.error("Max 10 MB per file");
@@ -215,7 +217,8 @@ function Enquiries() {
   );
 }
 
-const ORDER_STATUSES = ["CREATED","PAYMENT_PENDING","PAYMENT_SUBMITTED","PAYMENT_VERIFIED","WORK_STARTED","IN_PROGRESS","READY_FOR_DELIVERY","COMPLETED","CANCELLED"];
+const ORDER_STATUSES = ["CREATED","PAYMENT_PENDING","PAYMENT_SUBMITTED","PENDING_VERIFICATION","PAYMENT_VERIFIED","WORK_STARTED","IN_PROGRESS","READY_FOR_DELIVERY","COMPLETED","CANCELLED"];
+const EDITABLE_ORDER_STATUSES = ["CREATED","WORK_STARTED","IN_PROGRESS","READY_FOR_DELIVERY","COMPLETED","CANCELLED"];
 
 function Orders() {
   const [items, setItems] = useState([]);
@@ -229,7 +232,9 @@ function Orders() {
     const qs = params.toString();
     return api.get(`/orders/admin/all${qs?`?${qs}`:""}`).then(r=>setItems(r.data));
   };
-  useEffect(()=>{ load(); /* eslint-disable-next-line */ },[]);
+  // Load the initial order list; subsequent reloads are user-triggered.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(()=>{ load(); },[]);
   const applyFilters = (e) => { e?.preventDefault?.(); load(); };
   const reset = () => { setFilters({ q:"", status:"", payment_status:"", date_from:"", date_to:"" }); setTimeout(load, 0); };
   const exportCsv = async () => {
@@ -247,10 +252,6 @@ function Orders() {
   const open = async (id) => { const { data } = await api.get(`/orders/${id}`); setSel(data); setNewStatus(data.order_status); setNote(""); };
   const updateStatus = async () => {
     try { await api.post(`/orders/${sel.id}/status`, { order_status: newStatus, note }); toast.success("Status updated"); open(sel.id); load(); }
-    catch(e){ toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
-  };
-  const verifyPayment = async (action) => {
-    try { await api.post(`/orders/${sel.id}/payment/verify`, { action, note }); toast.success(`Payment ${action}`); open(sel.id); load(); }
     catch(e){ toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
   };
   const downloadInvoice = async () => {
@@ -356,7 +357,8 @@ function Orders() {
               <div className="font-semibold text-sm">Update Status</div>
               <div className="flex gap-2 mt-2 flex-wrap">
                 <select className="zx-input" value={newStatus} onChange={e=>setNewStatus(e.target.value)} data-testid="admin-status-select">
-                  {ORDER_STATUSES.map(s => <option key={s} value={s}>{s.replace(/_/g,' ')}</option>)}
+                  {!EDITABLE_ORDER_STATUSES.includes(newStatus) && <option value={newStatus} disabled>{newStatus.replace(/_/g,' ')} · system-managed</option>}
+                  {EDITABLE_ORDER_STATUSES.map(s => <option key={s} value={s}>{s.replace(/_/g,' ')}</option>)}
                 </select>
                 <input className="zx-input flex-1 min-w-[10rem]" placeholder="Note (optional)" value={note} onChange={e=>setNote(e.target.value)} />
                 <button className="zx-btn-primary" onClick={updateStatus} data-testid="admin-update-status-btn">Update</button>
@@ -396,7 +398,9 @@ function Payments() {
       setItems(data);
     }
   };
-  useEffect(()=>{ load(); /* eslint-disable-next-line */ }, [tab]);
+  // Reload the payment list when the selected tab changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(()=>{ load(); }, [tab]);
 
   const remindAll = async (force=false) => {
     if (!confirm(`Send a payment reminder email to every customer with an unpaid order?${force?"\n(force=true — ignores 24h cooldown)":"\n(orders reminded in the last 24h will be skipped)"}`)) return;
@@ -553,6 +557,8 @@ function SupportTicketsAdmin() {
   const [reply, setReply] = useState("");
   const [busy, setBusy] = useState(false);
   const load = () => api.get(`/support/admin/tickets${status || priority ? `?${new URLSearchParams({...(status?{status}:{}),...(priority?{priority}:{})}).toString()}` : ""}`).then(r=>setItems(r.data));
+  // Reload tickets when either filter changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(()=>{ load(); }, [status, priority]);
   const update = async (extra={}) => {
     if (!selected) return;
@@ -602,7 +608,9 @@ function Reports() {
   const [days, setDays] = useState(30);
   const [busy, setBusy] = useState(false);
   const load = () => api.get(`/reports/monthly?days=${days}`).then(r=>setData(r.data));
-  useEffect(()=>{ load(); /* eslint-disable-next-line */ }, [days]);
+  // Reload the report when its date range changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(()=>{ load(); }, [days]);
   const sendNow = async () => {
     setBusy(true);
     try { await api.post("/reports/monthly/send"); toast.success("Report email queued to admin inbox"); }
