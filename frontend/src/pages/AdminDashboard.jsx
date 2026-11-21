@@ -20,7 +20,9 @@ function FileAttachments({ parentType, parentId }) {
   const [files, setFiles] = useState([]);
   const [busy, setBusy] = useState(false);
   const load = () => api.get(`/files/list?parent_type=${parentType}&parent_id=${parentId}`).then(r=>setFiles(r.data)).catch(()=>{});
-  useEffect(()=>{ if(parentId) load(); /* eslint-disable-next-line */ }, [parentId]);
+  // Reload attachments when the parent record changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(()=>{ if(parentId) load(); }, [parentId, parentType]);
   const upload = async (e) => {
     const f = e.target.files?.[0]; if (!f) return;
     if (f.size > 10 * 1024 * 1024) return toast.error("Max 10 MB per file");
@@ -230,7 +232,9 @@ function Orders() {
     const qs = params.toString();
     return api.get(`/orders/admin/all${qs?`?${qs}`:""}`).then(r=>setItems(r.data));
   };
-  useEffect(()=>{ load(); /* eslint-disable-next-line */ },[]);
+  // Load the initial order list; subsequent reloads are user-triggered.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(()=>{ load(); },[]);
   const applyFilters = (e) => { e?.preventDefault?.(); load(); };
   const reset = () => { setFilters({ q:"", status:"", payment_status:"", date_from:"", date_to:"" }); setTimeout(load, 0); };
   const exportCsv = async () => {
@@ -394,7 +398,9 @@ function Payments() {
       setItems(data);
     }
   };
-  useEffect(()=>{ load(); /* eslint-disable-next-line */ }, [tab]);
+  // Reload the payment list when the selected tab changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(()=>{ load(); }, [tab]);
 
   const remindAll = async (force=false) => {
     if (!confirm(`Send a payment reminder email to every customer with an unpaid order?${force?"\n(force=true — ignores 24h cooldown)":"\n(orders reminded in the last 24h will be skipped)"}`)) return;
@@ -551,6 +557,8 @@ function SupportTicketsAdmin() {
   const [reply, setReply] = useState("");
   const [busy, setBusy] = useState(false);
   const load = () => api.get(`/support/admin/tickets${status || priority ? `?${new URLSearchParams({...(status?{status}:{}),...(priority?{priority}:{})}).toString()}` : ""}`).then(r=>setItems(r.data));
+  // Reload tickets when either filter changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(()=>{ load(); }, [status, priority]);
   const update = async (extra={}) => {
     if (!selected) return;
@@ -600,7 +608,9 @@ function Reports() {
   const [days, setDays] = useState(30);
   const [busy, setBusy] = useState(false);
   const load = () => api.get(`/reports/monthly?days=${days}`).then(r=>setData(r.data));
-  useEffect(()=>{ load(); /* eslint-disable-next-line */ }, [days]);
+  // Reload the report when its date range changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(()=>{ load(); }, [days]);
   const sendNow = async () => {
     setBusy(true);
     try { await api.post("/reports/monthly/send"); toast.success("Report email queued to admin inbox"); }
