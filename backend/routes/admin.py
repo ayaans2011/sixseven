@@ -1,11 +1,13 @@
 from datetime import datetime, timezone, timedelta
+import hashlib
+import secrets
 from fastapi import APIRouter, HTTPException, Depends
 from bson import ObjectId
 
 from pydantic import BaseModel
 from database import get_db
-from security import require_admin, get_current_user, audit_log
-from models import ContentIn
+from security import require_admin, get_current_user, audit_log, verify_password, verify_totp, hash_password
+from models import ContentIn, AdminCustomerCreateIn, AdminCustomerDeleteIn
 from services import email as email_svc
 
 router = APIRouter(prefix="/api", tags=["admin_content"])
@@ -54,6 +56,191 @@ async def list_customers(admin=Depends(require_admin)):
         "disabled": u.get("disabled", False),
         "created_at": u.get("created_at"),
     } for u in items]
+
+
+@router.post("/admin/customers")
+async def create_customer(data: AdminCustomerCreateIn, admin=Depends(require_admin)):
+    """Create a passwordless customer account and send a one-time password setup link."""
+    db = get_db()
+    email = str(data.email).lower().strip()
+    existing = await db.users.find_one({"email": email})
+    if existing and existing.get("role") != "customer":
+        raise HTTPException(status_code=409, detail="This email is already assigned to a non-customer account.")
+    if existing and existing.get("account_status") != "pending_activation":
+        raise HTTPException(status_code=409, detail="A customer account with this email already exists.")
+
+    now = datetime.now(timezone.utc)
+    token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    if existing:
+        uid = str(existing["_id"])
+        await db.users.update_one(
+            {"_id": existing["_id"], "role": "customer"},
+            {"$set": {
+                "name": data.name.strip(), "phone": data.phone, "company": data.company,
+                "password_hash": hash_password(secrets.token_urlsafe(48)),
+                "account_status": "pending_activation", "disabled": False,
+                "invited_at": now.isoformat(), "invited_by": admin["id"],
+            }},
+        )
+        await db.account_activation_tokens.update_many(
+            {"user_id": uid, "used": False}, {"$set": {"used": True}}
+        )
+    else:
+        result = await db.users.insert_one({
+            "email": email,
+            "name": data.name.strip(),
+            "phone": data.phone,
+            "company": data.company,
+            "password_hash": hash_password(secrets.token_urlsafe(48)),
+            "role": "customer",
+            "account_status": "pending_activation",
+            "disabled": False,
+            "created_at": now.isoformat(),
+            "invited_at": now.isoformat(),
+            "invited_by": admin["id"],
+        })
+        uid = str(result.inserted_id)
+
+    await db.account_activation_tokens.insert_one({
+        "user_id": uid, "token_hash": token_hash, "used": False,
+        "expires_at": now + timedelta(minutes=30), "created_at": now,
+        "created_by": admin["id"],
+    })
+    email_svc.admin_customer_invitation(to_email=email, name=data.name.strip(), activation_token=token)
+    await audit_log("customer_invited_by_admin", admin["id"], admin["email"], "user", uid, {"email": email})
+    return {"success": True, "customer_id": uid, "account_status": "pending_activation", "invitation_requested": True}
+
+
+@router.get("/admin/customers/{uid}")
+async def get_customer_record(uid: str, admin=Depends(require_admin)):
+    """Return the customer profile and linked business, support and payment records."""
+    db = get_db()
+    try:
+        customer = await db.users.find_one({"_id": ObjectId(uid), "role": "customer"})
+    except Exception:
+        customer = None
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    email = customer.get("email", "")
+    order_query = {"$or": [{"customer_id": uid}, {"customer_email": email}]}
+    enquiry_query = {"$or": [{"customer_id": uid}, {"email": email}]}
+    orders_raw = await db.orders.find(order_query).sort("created_at", -1).to_list(500)
+    enquiries_raw = await db.enquiries.find(enquiry_query).sort("created_at", -1).to_list(500)
+    order_ids = [str(o["_id"]) for o in orders_raw]
+    enquiry_ids = [str(e["_id"]) for e in enquiries_raw]
+    payments = []
+    for order in orders_raw:
+        rows = await db.payments.find({"order_id": str(order["_id"])}).sort("created_at", -1).to_list(100)
+        for p in rows:
+            payments.append({
+                "id": str(p["_id"]), "order_id": str(order["_id"]),
+                "order_number": order.get("order_number"),
+                "method": p.get("method"), "reference": p.get("reference"),
+                "amount": p.get("amount"), "status": p.get("status"),
+                "provider_order_id": p.get("provider_order_id"),
+                "created_at": p.get("created_at"), "verified_at": p.get("verified_at"),
+            })
+    support = await db.support_tickets.find({"customer_id": uid}).sort("created_at", -1).to_list(300)
+    notifications = await db.notifications.find({"user_id": uid}).sort("created_at", -1).to_list(300)
+    files = await db.files.find({"parent_id": {"$in": order_ids + enquiry_ids}, "deleted": {"$ne": True}}).sort("created_at", -1).to_list(500)
+    messages = await db.messages.find({"parent_id": {"$in": order_ids + enquiry_ids}}).sort("created_at", -1).to_list(500)
+    audits = await db.audit_logs.find({"target_id": uid}).sort("timestamp", -1).to_list(200)
+
+    profile = {
+        "id": uid, "name": customer.get("name"), "email": email,
+        "phone": customer.get("phone"), "company": customer.get("company"),
+        "address": customer.get("address"), "disabled": customer.get("disabled", False),
+        "account_status": customer.get("account_status", "active"),
+        "created_at": customer.get("created_at"), "invited_at": customer.get("invited_at"),
+        "activated_at": customer.get("activated_at"),
+    }
+    orders = [{
+        "id": str(o["_id"]), "order_number": o.get("order_number"),
+        "service_name": o.get("service_name"), "amount": o.get("amount", 0),
+        "payment_status": o.get("payment_status"), "order_status": o.get("order_status"),
+        "created_at": o.get("created_at"), "updated_at": o.get("updated_at"),
+    } for o in orders_raw]
+    enquiries = [{
+        "id": str(e["_id"]), "enquiry_number": e.get("enquiry_number"),
+        "service_name": e.get("service_name"), "status": e.get("status"),
+        "requirement": e.get("requirement"), "message": e.get("message"),
+        "created_at": e.get("created_at"), "admin_response": e.get("admin_response"),
+    } for e in enquiries_raw]
+    support_rows = [{
+        "id": str(t["_id"]), "ticket_number": t.get("ticket_number"),
+        "subject": t.get("subject"), "message": t.get("message"),
+        "status": t.get("status"), "priority": t.get("priority"),
+        "replies": t.get("replies", []), "created_at": t.get("created_at"),
+        "updated_at": t.get("updated_at"),
+    } for t in support]
+    file_rows = [{
+        "id": str(x["_id"]), "parent_type": x.get("parent_type"),
+        "parent_id": x.get("parent_id"), "original_name": x.get("original_name"),
+        "size": x.get("size"), "created_at": x.get("created_at"),
+    } for x in files]
+    message_rows = [{
+        "id": str(m["_id"]), "parent_type": m.get("parent_type"),
+        "parent_id": m.get("parent_id"), "sender_role": m.get("sender_role"),
+        "sender_email": m.get("sender_email"), "body": m.get("body"),
+        "created_at": m.get("created_at"),
+    } for m in messages]
+    notification_rows = [{
+        "id": str(n["_id"]), "title": n.get("title"), "body": n.get("body"),
+        "read": n.get("read", False), "created_at": n.get("created_at"),
+    } for n in notifications]
+    audit_rows = [{
+        "action": a.get("action"), "actor_email": a.get("actor_email"),
+        "metadata": a.get("metadata", {}), "timestamp": a.get("timestamp"),
+    } for a in audits]
+    await audit_log("customer_record_viewed", admin["id"], admin["email"], "user", uid)
+    return {
+        "customer": profile, "orders": orders, "payments": payments,
+        "enquiries": enquiries, "support_tickets": support_rows,
+        "attachments": file_rows, "messages": message_rows,
+        "notifications": notification_rows, "audit_history": audit_rows,
+    }
+
+
+@router.post("/admin/customers/{uid}/delete")
+async def delete_customer_account(uid: str, data: AdminCustomerDeleteIn, admin=Depends(require_admin)):
+    """Re-authenticate admin with password + current TOTP; deactivate/anonymise profile, retain financial records."""
+    db = get_db()
+    try:
+        admin_doc = await db.users.find_one({"_id": ObjectId(admin["id"]), "role": "admin", "disabled": {"$ne": True}})
+        customer = await db.users.find_one({"_id": ObjectId(uid), "role": "customer"})
+    except Exception:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    if not admin_doc or not verify_password(data.admin_password, admin_doc.get("password_hash", "")):
+        raise HTTPException(status_code=401, detail="Administrator re-authentication failed.")
+    if not verify_totp(admin_doc.get("two_factor_secret", ""), data.totp_code):
+        raise HTTPException(status_code=401, detail="Authenticator verification failed.")
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    if str(data.confirm_customer_email).lower().strip() != customer.get("email", "").lower().strip():
+        raise HTTPException(status_code=400, detail="Customer email confirmation does not match.")
+
+    now = datetime.now(timezone.utc).isoformat()
+    deleted_email = f"deleted+{uid}@deleted.zeroaxis.invalid"
+    await audit_log(
+        "customer_account_deactivated_and_anonymised", admin["id"], admin["email"],
+        "user", uid, {"previous_email": customer.get("email"), "financial_records_retained": True},
+    )
+    await db.users.update_one(
+        {"_id": customer["_id"], "role": "customer"},
+        {"$set": {
+            "email": deleted_email, "name": "Deleted customer", "phone": None,
+            "company": None, "address": None, "disabled": True,
+            "account_status": "deleted", "password_hash": hash_password(secrets.token_urlsafe(48)),
+            "deleted_at": now, "deleted_by": admin["id"],
+        }, "$unset": {"two_factor_secret": "", "two_factor_pending_secret": ""}},
+    )
+    await db.password_reset_tokens.delete_many({"user_id": uid})
+    await db.account_activation_tokens.delete_many({"user_id": uid})
+    await db.registration_email_otps.delete_many({"email": customer.get("email")})
+    await db.notifications.delete_many({"user_id": uid})
+    return {"success": True, "account_status": "deleted", "financial_records_retained": True}
 
 
 @router.post("/admin/customers/{uid}/toggle")
