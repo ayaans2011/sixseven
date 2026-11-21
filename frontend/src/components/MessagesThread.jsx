@@ -16,7 +16,9 @@ export default function MessagesThread({ parentType, parentId }) {
     } catch {}
   };
 
-  useEffect(() => { if (parentId) load(); /* eslint-disable-next-line */ }, [parentId, parentType]);
+  // Load when the thread identity changes; the local loader is intentionally not a dependency.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (parentId) load(); }, [parentId, parentType]);
 
   useEffect(() => {
     if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
