@@ -5,6 +5,7 @@ import Footer from "@/components/Footer";
 
 export default function TrackOrderPage() {
   const [tn, setTn] = useState("");
+  const [email, setEmail] = useState("");
   const [result, setResult] = useState(null);
   const [err, setErr] = useState("");
 
@@ -12,7 +13,7 @@ export default function TrackOrderPage() {
     e.preventDefault();
     setErr(""); setResult(null);
     try {
-      const { data } = await api.get(`/orders/track/${encodeURIComponent(tn.trim())}`);
+      const { data } = await api.get(`/orders/track/${encodeURIComponent(tn.trim())}`, { params: { email: email.trim() } });
       setResult(data);
     } catch { setErr("Order not found. Please check the tracking number."); }
   };
@@ -22,9 +23,10 @@ export default function TrackOrderPage() {
       <Header />
       <div className="container-page py-10 max-w-3xl">
         <h1 className="font-serif text-3xl font-bold text-[#0A1128]">Track Order</h1>
-        <p className="text-[#4B5563] mt-1">Enter your tracking number (e.g. ZAX-2026-000001)</p>
-        <form onSubmit={track} className="mt-6 flex gap-2" data-testid="track-form">
-          <input className="zx-input" placeholder="ZAX-YYYY-NNNNNN" value={tn} onChange={e=>setTn(e.target.value)} data-testid="track-input" required />
+        <p className="text-[#4B5563] mt-1">Enter the tracking token and the email address used when placing the order.</p>
+        <form onSubmit={track} className="mt-6 grid gap-3 sm:grid-cols-[1fr_1fr_auto]" data-testid="track-form">
+          <input className="zx-input" placeholder="Tracking token" value={tn} onChange={e=>setTn(e.target.value)} data-testid="track-input" required />
+          <input className="zx-input" type="email" placeholder="Order email address" value={email} onChange={e=>setEmail(e.target.value)} data-testid="track-email" required />
           <button className="zx-btn-primary" data-testid="track-submit-btn">Track</button>
         </form>
         {err && <div className="text-[#A11B1B] mt-3 text-sm" data-testid="track-error">{err}</div>}
