@@ -34,7 +34,7 @@ export default function ActivateAccount() {
 
   return <div><Header /><div className="container-page py-16 max-w-md">
     <h1 className="font-serif text-2xl font-bold text-[#0A1128]">Set your password</h1>
-    <p className="text-sm text-[#6B7280] mt-1">Your enquiry created a customer account. Choose a password to activate it.</p>
+    <p className="text-sm text-[#6B7280] mt-1">A ZEROAXIS customer account has been created for you. Choose your own password to activate it.</p>
     <form onSubmit={submit} className="zx-card mt-6 space-y-4">
       <div><label className="zx-label">New password</label><input required minLength={8} type="password" autoComplete="new-password" className="zx-input" value={value} onChange={e=>setValue(e.target.value)} /></div>
       <div><label className="zx-label">Confirm password</label><input required minLength={8} type="password" autoComplete="new-password" className="zx-input" value={again} onChange={e=>setAgain(e.target.value)} /></div>
