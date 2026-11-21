@@ -92,7 +92,7 @@ async function downloadInvoice(orderId, orderNumber) {
 
 function StatusBadge({ status, type = "order" }) {
   const map = {
-    UNPAID: "gray", PAYMENT_SUBMITTED: "amber", PENDING_VERIFICATION: "amber", PAYMENT_PENDING: "amber",
+    UNPAID: "gray", PAYMENT_SUBMITTED: "amber", PENDING_VERIFICATION: "amber", PAYMENT_PENDING: "amber", PAYMENT_PENDING: "amber",
     PAYMENT_VERIFIED: "green", PAYMENT_REJECTED: "red", REFUNDED: "gray",
     CREATED: "blue", WORK_STARTED: "blue", IN_PROGRESS: "blue",
     READY_FOR_DELIVERY: "amber", COMPLETED: "green", CANCELLED: "red",
@@ -215,48 +215,67 @@ function NewOrder({ onCreated }) {
   );
 }
 
+
 function PaymentForm({ orderId, amount, onDone }) {
-  const [form, setForm] = useState({ method: "UPI", reference: "", amount, note: "" });
+  const [payment, setPayment] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [qr, setQr] = useState(null);
+  const [checking, setChecking] = useState(false);
+
   useEffect(() => {
-    api.get(`/orders/${orderId}/qr`).then(r => setQr(r.data)).catch(()=>setQr({data_url:null}));
+    api.get("/orders/" + orderId + "/payment/status").then(({ data }) => {
+      if (data.checkout) setPayment(data.checkout);
+      if (data.status === "success") onDone && onDone();
+    }).catch(() => {});
   }, [orderId]);
-  const submit = async (e) => {
-    e.preventDefault(); setBusy(true);
+
+  const createCheckout = async () => {
+    setBusy(true);
     try {
-      await api.post(`/orders/${orderId}/payment`, { ...form, amount: Number(form.amount) });
-      toast.success("Payment submitted for verification"); onDone && onDone();
+      const { data } = await api.post("/orders/" + orderId + "/payment/create");
+      setPayment(data);
+      toast.success("Secure UPI checkout created");
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
     finally { setBusy(false); }
   };
+
+  const checkStatus = async () => {
+    setChecking(true);
+    try {
+      const { data } = await api.get("/orders/" + orderId + "/payment/status");
+      if (data.status === "success") {
+        toast.success("Payment confirmed");
+        onDone && onDone();
+      } else if (data.status === "expired") {
+        setPayment(null);
+        toast.error("Payment session expired. Create a new checkout.");
+      } else {
+        toast.info("Payment is still awaiting confirmation");
+      }
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
+    finally { setChecking(false); }
+  };
+
   return (
-    <form onSubmit={submit} className="space-y-2 mt-3" data-testid={`payment-form-${orderId}`}>
-      {qr && qr.data_url ? (
-        <div className="border border-[#E5E7EB] p-3 bg-[#F8F9FA] flex gap-3 items-start" data-testid={`payment-qr-${orderId}`}>
-          <img src={qr.data_url} alt="Payment QR" className="w-32 h-32 object-contain bg-white border border-[#E5E7EB] p-1" />
-          <div className="text-xs text-[#4B5563]">
-            <div className="font-semibold text-[#0A1128] mb-1">Scan to pay</div>
-            <div>Amount: <b>₹{Number(amount).toLocaleString('en-IN')}</b></div>
-            {qr.label && <div className="mt-1">{qr.label}</div>}
-            <div className="mt-2 text-[#6B7280]">After paying, enter the UPI/UTR reference below and submit for verification.</div>
-          </div>
-        </div>
+    <div className="space-y-3 mt-3" data-testid={"payment-form-" + orderId}>
+      <div className="text-sm text-[#4B5563]">Pay securely through FamGateway. The amount is fixed to the order total.</div>
+      <div className="text-sm font-semibold text-[#0A1128]">Amount: ₹{Number(amount).toLocaleString("en-IN")}</div>
+      {!payment ? (
+        <button type="button" disabled={busy} onClick={createCheckout} className="zx-btn-primary" data-testid={"payment-submit-" + orderId}>
+          {busy ? "Creating checkout…" : "Continue to UPI payment"}
+        </button>
       ) : (
-        <div className="text-xs text-[#6B7280] border border-dashed border-[#E5E7EB] p-2">
-          Payment QR is not yet available for this order. Please contact admin for payment details or submit your reference after paying via the shared method.
+        <div className="border border-[#E5E7EB] p-3 bg-[#F8F9FA] space-y-3">
+          {payment.qr_url && <img src={payment.qr_url} alt="Dynamic payment QR" className="w-40 h-40 object-contain bg-white border border-[#E5E7EB] p-1" />}
+          <div className="text-xs text-[#4B5563]">Payment reference: <b>{payment.order_id}</b></div>
+          <div className="flex flex-wrap gap-2">
+            {payment.upi_intent && <a className="zx-btn-primary inline-flex items-center" href={payment.upi_intent}>Open UPI app</a>}
+            {payment.checkout_url && <a className="zx-btn-outline inline-flex items-center" href={payment.checkout_url} target="_blank" rel="noreferrer">Other payment options</a>}
+            <button type="button" className="zx-btn-outline" onClick={checkStatus} disabled={checking}>{checking ? "Checking…" : "I have paid — check status"}</button>
+          </div>
+          <div className="text-xs text-[#6B7280]">This payment session expires after approximately 5 minutes. Payment is marked complete only after provider verification.</div>
         </div>
       )}
-      <div className="grid grid-cols-2 gap-2">
-        <select className="zx-input" value={form.method} onChange={e=>setForm({...form, method: e.target.value})}>
-          <option>UPI</option><option>Bank Transfer</option><option>Cash</option><option>Other</option>
-        </select>
-        <input className="zx-input" placeholder="Reference / UTR" value={form.reference} onChange={e=>setForm({...form, reference: e.target.value})} required data-testid={`payment-reference-${orderId}`} />
-      </div>
-      <input type="number" className="zx-input" placeholder="Amount" value={form.amount} onChange={e=>setForm({...form, amount: e.target.value})} required />
-      <textarea rows={2} className="zx-input" placeholder="Note (optional)" value={form.note} onChange={e=>setForm({...form, note: e.target.value})}></textarea>
-      <button disabled={busy} className="zx-btn-primary" data-testid={`payment-submit-${orderId}`}>{busy?"Submitting…":"Submit Payment"}</button>
-    </form>
+    </div>
   );
 }
 
