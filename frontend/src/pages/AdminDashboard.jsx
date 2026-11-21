@@ -353,6 +353,7 @@ function Orders() {
               <div className="font-semibold text-sm">Update Status</div>
               <div className="flex gap-2 mt-2 flex-wrap">
                 <select className="zx-input" value={newStatus} onChange={e=>setNewStatus(e.target.value)} data-testid="admin-status-select">
+                  {!EDITABLE_ORDER_STATUSES.includes(newStatus) && <option value={newStatus} disabled>{newStatus.replace(/_/g,' ')} · system-managed</option>}
                   {EDITABLE_ORDER_STATUSES.map(s => <option key={s} value={s}>{s.replace(/_/g,' ')}</option>)}
                 </select>
                 <input className="zx-input flex-1 min-w-[10rem]" placeholder="Note (optional)" value={note} onChange={e=>setNote(e.target.value)} />
