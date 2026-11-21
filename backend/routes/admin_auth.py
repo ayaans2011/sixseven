@@ -4,6 +4,10 @@ from pydantic import BaseModel, EmailStr
 from bson import ObjectId
 import hashlib
 import secrets
+import base64
+from io import BytesIO
+import qrcode
+from qrcode.image.svg import SvgPathImage
 
 from database import get_db
 from security import (
@@ -88,8 +92,12 @@ async def admin_login(data: AdminLoginIn, request: Request):
         issuer = "ZEROAXIS"
         label = f"{issuer}:{email}"
         otp_uri = f"otpauth://totp/{label}?secret={secret}&issuer={issuer}&algorithm=SHA1&digits=6&period=30"
+        qr = qrcode.make(otp_uri, image_factory=SvgPathImage, box_size=8, border=4)
+        qr_buffer = BytesIO()
+        qr.save(qr_buffer)
+        qr_code_svg_base64 = base64.b64encode(qr_buffer.getvalue()).decode("ascii")
         await audit_log("admin_2fa_setup_started", str(user["_id"]), email, "user", str(user["_id"]))
-        return {"two_factor_setup_required": True, "challenge": challenge, "secret": secret, "otpauth_uri": otp_uri}
+        return {"two_factor_setup_required": True, "challenge": challenge, "secret": secret, "otpauth_uri": otp_uri, "qr_code_svg_base64": qr_code_svg_base64}
 
     challenge = secrets.token_urlsafe(32)
     await db.admin_login_challenges.insert_one({
