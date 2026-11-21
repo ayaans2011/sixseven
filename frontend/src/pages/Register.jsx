@@ -46,7 +46,7 @@ export default function RegisterPage() {
             <div><label className="zx-label">Full Name</label><input required minLength={2} data-testid="register-name" className="zx-input" value={form.name} onChange={e=>setForm({...form, name:e.target.value})} /></div>
             <div><label className="zx-label">Email</label><input required type="email" data-testid="register-email" className="zx-input" value={form.email} onChange={e=>setForm({...form, email:e.target.value})} /></div>
             <div><label className="zx-label">Phone</label><input data-testid="register-phone" className="zx-input" value={form.phone} onChange={e=>setForm({...form, phone:e.target.value})} /></div>
-            <div><label className="zx-label">Password</label><input required minLength={6} type="password" data-testid="register-password" className="zx-input" value={form.password} onChange={e=>setForm({...form, password:e.target.value})} /></div>
+            <div><label className="zx-label">Password</label><input required minLength={8} type="password" data-testid="register-password" className="zx-input" value={form.password} onChange={e=>setForm({...form, password:e.target.value})} /></div>
             {err && <div className="text-[#A11B1B] text-sm" data-testid="register-error">{err}</div>}
             <button disabled={busy} className="zx-btn-primary w-full justify-center">{busy ? "Sending code…" : "Continue with email verification"}</button>
             <div className="text-sm text-[#4B5563]">Have an account? <Link to="/login" className="zx-link">Sign in</Link></div>
