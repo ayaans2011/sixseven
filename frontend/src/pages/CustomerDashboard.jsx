@@ -92,7 +92,7 @@ async function downloadInvoice(orderId, orderNumber) {
 
 function StatusBadge({ status, type = "order" }) {
   const map = {
-    UNPAID: "gray", PAYMENT_SUBMITTED: "amber", PENDING_VERIFICATION: "amber",
+    UNPAID: "gray", PAYMENT_SUBMITTED: "amber", PENDING_VERIFICATION: "amber", PAYMENT_PENDING: "amber",
     PAYMENT_VERIFIED: "green", PAYMENT_REJECTED: "red", REFUNDED: "gray",
     CREATED: "blue", WORK_STARTED: "blue", IN_PROGRESS: "blue",
     READY_FOR_DELIVERY: "amber", COMPLETED: "green", CANCELLED: "red",
@@ -317,7 +317,7 @@ function MyOrders() {
             <FileAttachments parentType="order" parentId={selected.id} />
             <MessagesThread parentType="order" parentId={selected.id} />
 
-            {["UNPAID","PAYMENT_REJECTED"].includes(selected.payment_status) && (
+            {["UNPAID","PAYMENT_REJECTED","PAYMENT_PENDING"].includes(selected.payment_status) && (
               <div className="mt-4">
                 <div className="font-semibold text-sm">Submit Payment</div>
                 <PaymentForm orderId={selected.id} amount={selected.amount} onDone={async()=>{ await load(); openDetail(selected.id); }} />

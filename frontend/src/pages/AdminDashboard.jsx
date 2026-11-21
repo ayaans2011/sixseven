@@ -79,7 +79,7 @@ function FileAttachments({ parentType, parentId }) {
 
 function StatusBadge({ status }) {
   const map = {
-    UNPAID: "gray", PAYMENT_SUBMITTED: "amber", PENDING_VERIFICATION: "amber",
+    UNPAID: "gray", PAYMENT_SUBMITTED: "amber", PENDING_VERIFICATION: "amber", PAYMENT_PENDING: "amber",
     PAYMENT_VERIFIED: "green", PAYMENT_REJECTED: "red", REFUNDED: "gray",
     CREATED: "blue", WORK_STARTED: "blue", IN_PROGRESS: "blue",
     READY_FOR_DELIVERY: "amber", COMPLETED: "green", CANCELLED: "red",
@@ -328,7 +328,7 @@ function AdminOrderQRBlock({ orderId }) {
   );
 }
 
-const ORDER_STATUSES = ["CREATED","PAYMENT_SUBMITTED","PAYMENT_VERIFIED","WORK_STARTED","IN_PROGRESS","READY_FOR_DELIVERY","COMPLETED","CANCELLED"];
+const ORDER_STATUSES = ["CREATED","PAYMENT_PENDING","PAYMENT_SUBMITTED","PAYMENT_VERIFIED","WORK_STARTED","IN_PROGRESS","READY_FOR_DELIVERY","COMPLETED","CANCELLED"];
 
 function Orders() {
   const [items, setItems] = useState([]);
