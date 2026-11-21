@@ -88,7 +88,7 @@ async def activate_account(data: ActivateAccountIn):
         user_id = ObjectId(rec["user_id"])
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid account activation link")
-    result = await db.users.update_one({"_id": user_id}, {"$set": {"password_hash": hash_password(data.new_password), "account_status": "active"}})
+    result = await db.users.update_one({"_id": user_id, "role": "customer", "account_status": {"$ne": "deleted"}}, {"$set": {"password_hash": hash_password(data.new_password), "account_status": "active", "activated_at": datetime.now(timezone.utc)}})
     if result.matched_count != 1:
         raise HTTPException(status_code=400, detail="Account activation link is invalid")
     await db.account_activation_tokens.update_one({"_id": rec["_id"]}, {"$set": {"used": True, "used_at": datetime.now(timezone.utc)}})
@@ -103,7 +103,9 @@ async def login(data: LoginIn, request: Request, response: Response):
     identifier = f"{ip}:{email}"
     await check_lockout(identifier)
     user = await db.users.find_one({"email": email})
-    if not user or not verify_password(data.password, user["password_hash"]):
+    if user and user.get("account_status") == "pending_activation":
+        raise HTTPException(status_code=403, detail="Set your password using the invitation email or Forgot Password first.")
+    if not user or not verify_password(data.password, user.get("password_hash", "")):
         await record_failed_login(identifier)
         raise HTTPException(status_code=401, detail="Invalid email or password")
     if user.get("disabled"):
@@ -184,7 +186,7 @@ async def reset_password(data: ResetPasswordIn):
     if not rec.get("otp_hash") or not secrets.compare_digest(supplied_otp, rec["otp_hash"]):
         await db.password_reset_tokens.update_one({"_id": rec["_id"]}, {"$inc": {"otp_attempts": 1}})
         raise HTTPException(status_code=400, detail="Invalid or expired verification code")
-    result = await db.users.update_one({"_id": ObjectId(rec["user_id"])}, {"$set": {"password_hash": hash_password(data.new_password)}})
+    result = await db.users.update_one({"_id": ObjectId(rec["user_id"]), "role": "customer", "account_status": {"$ne": "deleted"}}, {"$set": {"password_hash": hash_password(data.new_password), "account_status": "active", "activated_at": datetime.now(timezone.utc)}})
     if result.matched_count != 1:
         raise HTTPException(status_code=400, detail="Invalid or expired reset link")
     await db.password_reset_tokens.update_one({"_id": rec["_id"]}, {"$set": {"used": True, "otp_used": True}})
