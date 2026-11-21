@@ -111,9 +111,9 @@ async def admin_setup_2fa(data: AdminSetupIn, response: Response, request: Reque
     })
     if not rec:
         raise HTTPException(status_code=400, detail="Setup session is invalid or expired")
-    user = await db.users.find_one({"_id": ObjectId(rec["user_id"]), "role": "admin"})
+    user = await db.users.find_one({"_id": ObjectId(rec["user_id"]), "role": "admin", "disabled": {"$ne": True}})
     if not user:
-        raise HTTPException(status_code=400, detail="Admin account not found")
+        raise HTTPException(status_code=400, detail="Admin account not found or disabled")
     secret = user.get("two_factor_pending_secret", "")
     if not verify_totp(secret, data.code):
         await _record_challenge_failure(db, rec)
