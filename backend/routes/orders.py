@@ -6,6 +6,8 @@ import hmac
 import hashlib
 import httpx
 import logging
+import secrets
+from pydantic import EmailStr
 from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from fastapi.responses import Response, StreamingResponse
 from bson import ObjectId
@@ -65,10 +67,11 @@ async def create_order(data: OrderIn, user=Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Service not found")
 
     number = await generate_order_number()
+    tracking_token = secrets.token_urlsafe(24)
     now = datetime.now(timezone.utc).isoformat()
     doc = {
         "order_number": number,
-        "tracking_number": number,  # same public tracking id
+        "tracking_number": tracking_token,
         "customer_id": user["id"],
         "customer_name": user.get("name", ""),
         "customer_email": user["email"],
@@ -107,10 +110,14 @@ async def my_orders(user=Depends(get_current_user)):
 
 
 @router.get("/track/{tracking_number}")
-async def track_public(tracking_number: str):
-    """Public: track by tracking number returns limited info."""
+async def track_public(tracking_number: str, email: EmailStr = Query(...)):
+    """Public tracking requires both the private tracking token and order email."""
     db = get_db()
-    o = await db.orders.find_one({"tracking_number": tracking_number})
+    normalized_email = str(email).lower().strip()
+    o = await db.orders.find_one({
+        "tracking_number": tracking_number,
+        "customer_email": normalized_email,
+    })
     if not o:
         raise HTTPException(status_code=404, detail="Order not found")
     history = await db.order_status_history.find({"order_id": str(o["_id"])}).sort("timestamp", 1).to_list(200)
@@ -125,7 +132,6 @@ async def track_public(tracking_number: str):
         "history": [{
             "from_status": h.get("from_status"),
             "to_status": h.get("to_status"),
-            "note": h.get("note"),
             "timestamp": h.get("timestamp"),
         } for h in history],
     }
@@ -259,7 +265,7 @@ async def create_famgateway_payment(oid: str, user=Depends(get_current_user)):
     payload = {"amount": round(amount, 2),
         "customer_name": order.get("customer_name") or user.get("name") or "ZEROAXIS Customer",
         "customer_email": order.get("customer_email") or user.get("email"),
-        "redirect_url": frontend + "/customer"}
+        "redirect_url": frontend + "/dashboard"}
     webhook = os.environ.get("FAMGATEWAY_WEBHOOK_URL", "").strip()
     if webhook:
         payload["webhook_url"] = webhook
