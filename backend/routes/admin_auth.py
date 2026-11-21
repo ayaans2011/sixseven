@@ -34,6 +34,20 @@ def _challenge_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+async def _record_challenge_failure(db, rec: dict):
+    await db.admin_login_challenges.update_one(
+        {"_id": rec["_id"], "used": False},
+        {"$inc": {"attempts": 1}},
+    )
+    current = await db.admin_login_challenges.find_one({"_id": rec["_id"]})
+    if current and current.get("attempts", 0) >= 5:
+        await db.admin_login_challenges.update_one(
+            {"_id": rec["_id"]},
+            {"$set": {"used": True}},
+        )
+        raise HTTPException(status_code=429, detail="Too many invalid authenticator codes. Start login again.")
+
+
 async def _issue_admin_session(response: Response, user: dict):
     uid = str(user["_id"])
     email = user["email"]
@@ -67,7 +81,7 @@ async def admin_login(data: AdminLoginIn, request: Request):
         await db.admin_login_challenges.insert_one({
             "token_hash": _challenge_hash(challenge), "user_id": str(user["_id"]),
             "purpose": "setup", "expires_at": now + timedelta(minutes=10),
-            "used": False, "created_at": now,
+            "used": False, "attempts": 0, "created_at": now,
         })
         secret = user.get("two_factor_pending_secret") or generate_totp_secret()
         await db.users.update_one({"_id": user["_id"]}, {"$set": {"two_factor_pending_secret": secret}})
@@ -81,7 +95,7 @@ async def admin_login(data: AdminLoginIn, request: Request):
     await db.admin_login_challenges.insert_one({
         "token_hash": _challenge_hash(challenge), "user_id": str(user["_id"]),
         "purpose": "login", "expires_at": now + timedelta(minutes=5),
-        "used": False, "created_at": now,
+        "used": False, "attempts": 0, "created_at": now,
     })
     return {"two_factor_required": True, "challenge": challenge}
 
@@ -102,6 +116,7 @@ async def admin_setup_2fa(data: AdminSetupIn, response: Response, request: Reque
         raise HTTPException(status_code=400, detail="Admin account not found")
     secret = user.get("two_factor_pending_secret", "")
     if not verify_totp(secret, data.code):
+        await _record_challenge_failure(db, rec)
         raise HTTPException(status_code=400, detail="Invalid authenticator code")
     await db.users.update_one({"_id": user["_id"]}, {"$set": {
         "two_factor_secret": secret,
@@ -123,7 +138,8 @@ async def admin_verify_2fa(data: AdminOtpIn, response: Response, request: Reques
     if not rec:
         raise HTTPException(status_code=400, detail="Login session is invalid or expired")
     user = await db.users.find_one({"_id": ObjectId(rec["user_id"]), "role": "admin"})
-    if not user or not verify_totp(user.get("two_factor_secret", ""), data.code):
+    if not user or user.get("disabled") or not verify_totp(user.get("two_factor_secret", ""), data.code):
+        await _record_challenge_failure(db, rec)
         raise HTTPException(status_code=401, detail="Invalid authenticator code")
     await db.admin_login_challenges.update_one({"_id": rec["_id"]}, {"$set": {"used": True}})
     return await _issue_admin_session(response, user)
