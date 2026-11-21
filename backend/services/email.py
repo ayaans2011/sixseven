@@ -163,7 +163,7 @@ def _wrap(inner_html: str, footer_note: str = "") -> str:
 
 
 def _app_url(path: str = "") -> str:
-    base = _cfg("PUBLIC_APP_URL", "").rstrip("/")
+    base = (_cfg("PUBLIC_APP_URL") or _cfg("FRONTEND_URL", "https://zeroaxis.in")).rstrip("/")
     if not base:
         return ""
     p = path if path.startswith("/") else f"/{path}"
@@ -211,6 +211,19 @@ def enquiry_account_activation(*, to_email: str, name: str, enquiry_number: str,
         f'<p style="font-size:12px;color:#6B7280;margin-top:16px">'
         f'This link expires in 30 minutes and can only be used once.</p>'
         f'<p style="font-size:12px;color:#6B7280">If you did not submit this enquiry, you can safely ignore this email.</p>'
+    )
+    _bg_send(to=to_email, subject=subject, html=_wrap(inner))
+
+
+def admin_customer_invitation(*, to_email: str, name: str, activation_token: str):
+    subject = "Your ZEROAXIS customer account invitation"
+    activation_url = _app_url(f"/activate-account?token={activation_token}")
+    inner = (
+        f'<p>Hi {escape(name or "there")},</p>'
+        f'<p>A ZEROAXIS customer account has been created for this email address by our administrator.</p>'
+        f'<p>No password has been created or shared by the administrator. Use the secure one-time link below to choose your own password.</p>'
+        f'{_button(activation_url, "Set your password") if activation_url else ""}'
+        f'<p style="font-size:12px;color:#6B7280;margin-top:16px">This link expires in 30 minutes and can only be used once. If you did not expect this invitation, ignore this email or contact ZEROAXIS through its official website.</p>'
     )
     _bg_send(to=to_email, subject=subject, html=_wrap(inner))
 

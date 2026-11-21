@@ -97,7 +97,7 @@ async def get_current_user(request: Request) -> dict:
         user = await db.users.find_one({"_id": ObjectId(payload["sub"])})
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid user")
-    if not user or user.get("disabled"):
+    if not user or user.get("disabled") or user.get("account_status") == "deleted":
         raise HTTPException(status_code=401, detail="User not found")
     user["id"] = str(user["_id"])
     user.pop("_id", None)

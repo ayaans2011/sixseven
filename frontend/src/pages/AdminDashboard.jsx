@@ -118,25 +118,166 @@ function Dash() {
 
 function Customers() {
   const [items, setItems] = useState([]);
-  const load = () => api.get("/admin/customers").then(r=>setItems(r.data));
-  useEffect(()=>{ load(); },[]);
-  const toggle = async (id) => { await api.post(`/admin/customers/${id}/toggle`); load(); };
+  const [form, setForm] = useState({ name: "", email: "", phone: "", company: "" });
+  const [creating, setCreating] = useState(false);
+  const [selected, setSelected] = useState(null);
+  const [record, setRecord] = useState(null);
+  const [loadingRecord, setLoadingRecord] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteAuth, setDeleteAuth] = useState({ admin_password: "", totp_code: "", confirm_customer_email: "" });
+  const [deleting, setDeleting] = useState(false);
+
+  const load = () => api.get("/admin/customers").then(r => setItems(r.data)).catch(e => toast.error(formatApiErrorDetail(e.response?.data?.detail)));
+  useEffect(() => { load(); }, []);
+
+  const create = async (e) => {
+    e.preventDefault();
+    setCreating(true);
+    try {
+      const { data } = await api.post("/admin/customers", form);
+      toast.success("Customer account created. Password setup invitation requested.");
+      setForm({ name: "", email: "", phone: "", company: "" });
+      load();
+      if (!data.invitation_requested) toast.warning("Ask the customer to use Forgot Password to set their password.");
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e.response?.data?.detail));
+    } finally { setCreating(false); }
+  };
+
+  const toggle = async (id) => {
+    try { await api.post(`/admin/customers/${id}/toggle`); load(); }
+    catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
+  };
+
+  const viewRecord = async (u) => {
+    setSelected(u);
+    setRecord(null);
+    setLoadingRecord(true);
+    try {
+      const { data } = await api.get(`/admin/customers/${u.id}`);
+      setRecord(data);
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e.response?.data?.detail));
+      setSelected(null);
+    } finally { setLoadingRecord(false); }
+  };
+
+  const deleteCustomer = async (e) => {
+    e.preventDefault();
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await api.post(`/admin/customers/${deleteTarget.id}/delete`, deleteAuth);
+      toast.success("Customer login deactivated and profile anonymised. Financial and order records were retained.");
+      setDeleteTarget(null);
+      setDeleteAuth({ admin_password: "", totp_code: "", confirm_customer_email: "" });
+      setSelected(null);
+      setRecord(null);
+      load();
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e.response?.data?.detail));
+    } finally { setDeleting(false); }
+  };
+
+  const money = (v) => `₹${Number(v || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+  const recordSection = (title, count, children) => (
+    <section className="mt-5">
+      <div className="font-semibold text-[#0A1128] mb-2">{title} <span className="text-xs text-[#6B7280]">({count})</span></div>
+      {children}
+    </section>
+  );
+
   return (
     <div>
-      <h2 className="font-serif text-2xl font-bold text-[#0A1128]">Customers</h2>
-      <div className="overflow-x-auto mt-4"><table className="zx-table" data-testid="admin-customers-table"><thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Status</th><th>Joined</th><th></th></tr></thead><tbody>
-        {items.map(u => (
-          <tr key={u.id}>
-            <td>{u.name}</td><td>{u.email}</td><td>{u.phone||"—"}</td>
-            <td>{u.disabled ? <StatusBadge status="CANCELLED" /> : <StatusBadge status="COMPLETED" />}</td>
-            <td>{u.created_at ? new Date(u.created_at).toLocaleDateString() : "—"}</td>
-            <td className="flex gap-3">
-              <button onClick={()=>toggle(u.id)} className="zx-link text-sm" data-testid={`toggle-customer-${u.id}`}>{u.disabled?"Enable":"Disable"}</button>
-            </td>
-          </tr>
-        ))}
-        {items.length===0 && <tr><td colSpan="6" className="text-center py-6 text-[#6B7280]">No customers yet.</td></tr>}
-      </tbody></table></div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="font-serif text-2xl font-bold text-[#0A1128]">Customers</h2>
+        <div className="text-xs text-[#6B7280]">Admin-created accounts receive a one-time password setup link.</div>
+      </div>
+
+      <form onSubmit={create} className="zx-card mt-4 grid grid-cols-1 md:grid-cols-2 gap-3" data-testid="admin-create-customer-form">
+        <div><label className="zx-label">Customer name</label><input required minLength={2} maxLength={80} className="zx-input" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} /></div>
+        <div><label className="zx-label">Email address</label><input required type="email" className="zx-input" value={form.email} onChange={e=>setForm({...form,email:e.target.value})} /></div>
+        <div><label className="zx-label">Phone (optional)</label><input className="zx-input" value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})} /></div>
+        <div><label className="zx-label">Company (optional)</label><input className="zx-input" value={form.company} onChange={e=>setForm({...form,company:e.target.value})} /></div>
+        <div className="md:col-span-2 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-[#6B7280]">No password is set or displayed by the admin. The customer chooses one after verifying their email.</p>
+          <button disabled={creating} className="zx-btn-primary">{creating ? "Creating…" : "Create customer account"}</button>
+        </div>
+      </form>
+
+      <div className="overflow-x-auto mt-4">
+        <table className="zx-table" data-testid="admin-customers-table">
+          <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Account</th><th>Joined</th><th>Actions</th></tr></thead>
+          <tbody>
+            {items.map(u => (
+              <tr key={u.id}>
+                <td>{u.name}</td><td>{u.email}</td><td>{u.phone||"—"}</td>
+                <td>{u.disabled ? <StatusBadge status="CANCELLED" /> : <StatusBadge status={u.account_status === "pending_activation" ? "PAYMENT_PENDING" : "COMPLETED"} />}</td>
+                <td>{u.created_at ? new Date(u.created_at).toLocaleDateString() : "—"}</td>
+                <td className="flex flex-wrap gap-3">
+                  <button onClick={()=>viewRecord(u)} className="zx-link text-sm">View records</button>
+                  <button onClick={()=>toggle(u.id)} className="zx-link text-sm">{u.disabled?"Enable":"Disable"}</button>
+                  <button onClick={()=>{setDeleteTarget(u);setDeleteAuth({admin_password:"",totp_code:"",confirm_customer_email:""});}} className="text-[#A11B1B] text-sm">Delete</button>
+                </td>
+              </tr>
+            ))}
+            {items.length===0 && <tr><td colSpan="6" className="text-center py-6 text-[#6B7280]">No customers yet.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+
+      {selected && (
+        <div className="fixed inset-0 bg-black/50 z-50 overflow-y-auto p-3 sm:p-6" onClick={()=>{setSelected(null);setRecord(null);}}>
+          <div className="bg-white max-w-4xl mx-auto my-4 p-4 sm:p-6 border border-[#E5E7EB] shadow-xl" onClick={e=>e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="font-serif text-xl font-bold text-[#0A1128]">Customer record</h3>
+                {record && <div className="text-sm text-[#4B5563] mt-1">{record.customer.name} · {record.customer.email}</div>}
+              </div>
+              <button className="zx-btn-outline" onClick={()=>{setSelected(null);setRecord(null);}}>Close</button>
+            </div>
+            {loadingRecord || !record ? <div className="py-8 text-sm text-[#6B7280]">Loading customer records…</div> : (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-4">
+                  <div className="zx-card"><div className="text-xs text-[#6B7280]">Account status</div><b>{record.customer.account_status}</b></div>
+                  <div className="zx-card"><div className="text-xs text-[#6B7280]">Orders</div><b>{record.orders.length}</b></div>
+                  <div className="zx-card"><div className="text-xs text-[#6B7280]">Recorded payments</div><b>{record.payments.length}</b></div>
+                </div>
+                <div className="mt-4 text-sm grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div><b>Phone:</b> {record.customer.phone || "—"}</div>
+                  <div><b>Company:</b> {record.customer.company || "—"}</div>
+                  <div><b>Address:</b> {record.customer.address || "—"}</div>
+                  <div><b>Created:</b> {record.customer.created_at ? new Date(record.customer.created_at).toLocaleString() : "—"}</div>
+                </div>
+
+                {recordSection("Orders", record.orders.length, <div className="overflow-x-auto"><table className="zx-table"><thead><tr><th>Order</th><th>Service</th><th>Amount</th><th>Payment</th><th>Order status</th><th>Date</th></tr></thead><tbody>{record.orders.map(o=><tr key={o.id}><td>{o.order_number}</td><td>{o.service_name}</td><td>{money(o.amount)}</td><td>{o.payment_status}</td><td>{o.order_status}</td><td>{o.created_at ? new Date(o.created_at).toLocaleDateString() : "—"}</td></tr>)}{!record.orders.length&&<tr><td colSpan="6">No orders.</td></tr>}</tbody></table></div>)}
+                {recordSection("Payment records", record.payments.length, <div className="overflow-x-auto"><table className="zx-table"><thead><tr><th>Order</th><th>Method</th><th>Reference</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead><tbody>{record.payments.map(p=><tr key={p.id}><td>{p.order_number}</td><td>{p.method || "—"}</td><td className="font-mono text-xs">{p.reference || p.provider_order_id || "—"}</td><td>{money(p.amount)}</td><td>{p.status || "—"}</td><td>{p.created_at ? new Date(p.created_at).toLocaleString() : "—"}</td></tr>)}{!record.payments.length&&<tr><td colSpan="6">No separate payment rows. Order payment status is shown above.</td></tr>}</tbody></table></div>)}
+                {recordSection("Order status history", record.order_history.length, <div className="space-y-1 text-sm">{record.order_history.map((h,i)=><div key={i} className="border-b border-[#E5E7EB] py-1">{h.from_status || "Created"} → {h.to_status} · {h.note || "—"} · {h.actor_email || "system"} · {h.timestamp}</div>)}{!record.order_history.length&&<div className="text-[#6B7280]">No order history.</div>}</div>)}
+                {recordSection("Enquiries", record.enquiries.length, <div className="space-y-2">{record.enquiries.map(e=><div key={e.id} className="border border-[#E5E7EB] p-3 text-sm"><b>{e.enquiry_number || "Enquiry"}</b> · {e.service_name || "General"} · {e.status}<div className="mt-1">{e.requirement || e.message || "—"}</div>{e.admin_response&&<div className="mt-1 text-[#4B5563]">Admin response: {e.admin_response}</div>}</div>)}{!record.enquiries.length&&<div className="text-sm text-[#6B7280]">No enquiries.</div>}</div>)}
+                {recordSection("Support tickets", record.support_tickets.length, <div className="space-y-2">{record.support_tickets.map(t=><div key={t.id} className="border border-[#E5E7EB] p-3 text-sm"><b>{t.ticket_number}</b> · {t.subject} · {t.status}<div>{t.message}</div>{t.replies?.map((r,i)=><div key={r.id || i} className="mt-1 text-[#4B5563]">{r.role}: {r.message}</div>)}</div>)}{!record.support_tickets.length&&<div className="text-sm text-[#6B7280]">No support tickets.</div>}</div>)}
+                {recordSection("Messages", record.messages.length, <div className="max-h-56 overflow-y-auto space-y-2">{record.messages.map(m=><div key={m.id} className="border border-[#E5E7EB] p-2 text-sm"><b>{m.sender_role} · {m.sender_email}</b><div>{m.body}</div><div className="text-xs text-[#6B7280]">{m.created_at ? new Date(m.created_at).toLocaleString() : ""}</div></div>)}{!record.messages.length&&<div className="text-sm text-[#6B7280]">No messages.</div>}</div>)}
+                {recordSection("Attachments", record.attachments.length, <div className="space-y-1 text-sm">{record.attachments.map(a=><div key={a.id}>{a.original_name} · {a.size ? bytesHuman(a.size) : "—"}</div>)}{!record.attachments.length&&<div className="text-[#6B7280]">No attachments.</div>}</div>)}
+                {recordSection("Notifications", record.notifications.length, <div className="space-y-1 text-sm">{record.notifications.map(n=><div key={n.id}>{n.title}: {n.body}</div>)}{!record.notifications.length&&<div className="text-[#6B7280]">No notifications.</div>}</div>)}
+                {recordSection("Audit history", record.audit_history.length, <div className="space-y-1 text-sm">{record.audit_history.map((a,i)=><div key={i}>{a.action} · {a.actor_email} · {a.timestamp}</div>)}{!record.audit_history.length&&<div className="text-[#6B7280]">No linked audit history.</div>}</div>)}
+                <p className="text-xs text-[#6B7280] mt-5 border-t pt-3">Payment, order and accounting records are retained separately when required. Customer account deletion deactivates login and anonymises the profile; it does not erase transaction evidence.</p>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {deleteTarget && (
+        <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-3" onClick={()=>!deleting&&setDeleteTarget(null)}>
+          <form onSubmit={deleteCustomer} className="bg-white max-w-lg w-full p-5 border border-[#E5E7EB] shadow-xl" onClick={e=>e.stopPropagation()}>
+            <h3 className="font-serif text-xl font-bold text-[#A11B1B]">Deactivate and anonymise customer</h3>
+            <p className="text-sm text-[#4B5563] mt-2">This permanently disables this customer login and anonymises their profile. Order/payment records and necessary accounting evidence will be retained.</p>
+            <div className="mt-4"><label className="zx-label">Type customer email to confirm: {deleteTarget.email}</label><input required type="email" className="zx-input" value={deleteAuth.confirm_customer_email} onChange={e=>setDeleteAuth({...deleteAuth,confirm_customer_email:e.target.value})} /></div>
+            <div className="mt-3"><label className="zx-label">Your administrator password</label><input required type="password" autoComplete="current-password" className="zx-input" value={deleteAuth.admin_password} onChange={e=>setDeleteAuth({...deleteAuth,admin_password:e.target.value})} /></div>
+            <div className="mt-3"><label className="zx-label">Current 6-digit authenticator code</label><input required inputMode="numeric" pattern="[0-9]{6}" maxLength={6} className="zx-input" value={deleteAuth.totp_code} onChange={e=>setDeleteAuth({...deleteAuth,totp_code:e.target.value.replace(/\D/g,"").slice(0,6)})} /></div>
+            <div className="flex justify-end gap-2 mt-5"><button type="button" className="zx-btn-outline" disabled={deleting} onClick={()=>setDeleteTarget(null)}>Cancel</button><button className="zx-btn-primary bg-[#A11B1B]" disabled={deleting}>{deleting?"Verifying…":"Confirm secure deletion"}</button></div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }
