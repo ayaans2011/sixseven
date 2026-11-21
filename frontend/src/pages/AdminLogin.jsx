@@ -9,6 +9,7 @@ export default function AdminLogin() {
   const [secret, setSecret] = useState("");
   const [qrCode, setQrCode] = useState("");
   const [code, setCode] = useState("");
+  const [recoveryToken, setRecoveryToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -83,6 +84,15 @@ export default function AdminLogin() {
         <div><label className="zx-label">Authenticator code</label><input autoFocus required inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoComplete="one-time-code" className="zx-input tracking-[0.35em]" value={code} onChange={e=>setCode(e.target.value.replace(/\D/g,"").slice(0,6))}/></div>
         {error && <div className="text-[#A11B1B] text-sm">{error}</div>}
         <button disabled={busy} className="zx-btn-primary w-full justify-center">{busy ? "Verifying…" : "Verify and sign in"}</button>
+        <button type="button" disabled={busy} className="w-full text-sm text-[#00509E] underline" onClick={async()=>{setBusy(true);setError("");try{const {data}=await api.post("/admin-auth/recovery/request",form);setRecoveryToken(data.recovery_token);setCode("");setStep("recovery");}catch(e){setError(e.response?.data?.detail||"Could not start recovery");}finally{setBusy(false);}}}>Can't access your authenticator? Recover by email</button>
+      </form>}
+
+      {step === "recovery" && <form onSubmit={async(e)=>{e.preventDefault();setBusy(true);setError("");try{const {data}=await api.post("/admin-auth/recovery/verify",{recovery_token:recoveryToken,code});setChallenge(data.challenge);setSecret(data.secret);setQrCode(data.qr_code_svg_base64||"");setCode("");setStep("setup");setError("");}catch(e){setError(e.response?.data?.detail||"Recovery verification failed");}finally{setBusy(false);}}} className="mt-6 space-y-4">
+        <p className="text-sm text-[#4B5563]">Enter the six-digit recovery code sent to your registered admin email. The old authenticator will only be replaced after this code is verified.</p>
+        <div><label className="zx-label">Email recovery code</label><input autoFocus required inputMode="numeric" pattern="[0-9]{6}" maxLength={6} autoComplete="one-time-code" className="zx-input tracking-[0.35em]" value={code} onChange={e=>setCode(e.target.value.replace(/\D/g,"").slice(0,6))}/></div>
+        {error && <div className="text-[#A11B1B] text-sm">{error}</div>}
+        <button disabled={busy} className="zx-btn-primary w-full justify-center">{busy ? "Verifying…" : "Verify email code"}</button>
+        <button type="button" disabled={busy} className="w-full text-sm text-[#00509E] underline" onClick={()=>{setStep("otp");setCode("");setError("");}}>Back to authenticator login</button>
       </form>}
     </div>
   </div>;

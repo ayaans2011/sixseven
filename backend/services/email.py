@@ -404,3 +404,16 @@ def support_ticket_status_changed(*, to_email: str, name: str, ticket_number: st
         f'<p>Sign in to your dashboard to view the latest details.</p>'
     )
     _bg_send(to=to_email, subject=subject, html=_wrap(inner))
+
+
+def admin_2fa_recovery_otp(*, to_email: str, name: str, otp: str):
+    subject = "ZEROAXIS admin authenticator recovery code"
+    inner = (
+        f'<p>Hi {escape(name or "Administrator")},</p>'
+        f'<p>A request was made to reset the authenticator app for your ZEROAXIS administrator account.</p>'
+        f'<p>Use this one-time verification code to continue:</p>'
+        f'<p style="font-size:24px;letter-spacing:6px;font-weight:700"><b>{escape(otp)}</b></p>'
+        f'<p>This code expires in <b>10 minutes</b> and can only be used once.</p>'
+        f'<p>If you did not request this, do not share this code. Your authenticator will not be changed unless the code is verified.</p>'
+    )
+    _bg_send(to=to_email, subject=subject, html=_wrap(inner))
