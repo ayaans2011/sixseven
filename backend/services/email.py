@@ -163,7 +163,7 @@ def _wrap(inner_html: str, footer_note: str = "") -> str:
 
 
 def _app_url(path: str = "") -> str:
-    base = _cfg("PUBLIC_APP_URL", "").rstrip("/")
+    base = (_cfg("PUBLIC_APP_URL") or _cfg("FRONTEND_URL", "https://zeroaxis.in")).rstrip("/")
     if not base:
         return ""
     p = path if path.startswith("/") else f"/{path}"
