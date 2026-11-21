@@ -54,6 +54,7 @@ async def list_customers(admin=Depends(require_admin)):
         "phone": u.get("phone"),
         "company": u.get("company"),
         "disabled": u.get("disabled", False),
+        "account_status": u.get("account_status", "active"),
         "created_at": u.get("created_at"),
     } for u in items]
 
