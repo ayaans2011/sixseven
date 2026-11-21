@@ -291,17 +291,39 @@ function Orders() {
         </div>
       </form>
 
-      <div className="overflow-x-auto mt-4"><table className="zx-table" data-testid="admin-orders-table"><thead><tr><th>Number</th><th>Customer</th><th>Service</th><th>Amount</th><th>Payment</th><th>Status</th><th></th></tr></thead><tbody>
+      <div className="mt-4 flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-[#0A1128]">Order register</div>
+          <div className="text-xs text-[#6B7280] mt-0.5">Select an order to view its complete record and update progress</div>
+        </div>
+        <span className="zx-badge zx-badge-gray">{items.length} result{items.length===1?"":"s"}</span>
+      </div>
+      <div className="mt-3 space-y-3" data-testid="admin-orders-table">
         {items.map(o => (
-          <tr key={o.id}>
-            <td>{o.order_number}</td><td>{o.customer_name}<div className="text-xs text-[#6B7280]">{o.customer_email}</div></td>
-            <td>{o.service_name}</td><td>₹{Number(o.amount).toLocaleString('en-IN')}</td>
-            <td><StatusBadge status={o.payment_status} /></td><td><StatusBadge status={o.order_status} /></td>
-            <td><button className="zx-link text-sm" onClick={()=>open(o.id)} data-testid={`admin-open-order-${o.order_number}`}>Open</button></td>
-          </tr>
+          <article key={o.id} className="rounded-xl border border-[#DCE3EC] bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-xs font-semibold uppercase tracking-wider text-[#6B7280]">{o.order_number}</div>
+                <div className="mt-1 font-semibold text-[#0A1128]">{o.customer_name}</div>
+                <div className="text-xs text-[#6B7280] break-all">{o.customer_email}</div>
+                <div className="mt-2 text-sm text-[#4B5563]">{o.service_name}</div>
+              </div>
+              <div className="text-right">
+                <div className="text-xs text-[#6B7280]">Order amount</div>
+                <div className="font-serif text-xl font-bold text-[#0A1128]">₹{Number(o.amount).toLocaleString('en-IN')}</div>
+              </div>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <StatusBadge status={o.payment_status} />
+              <StatusBadge status={o.order_status} />
+            </div>
+            <div className="mt-3 flex justify-end border-t border-[#E5E7EB] pt-3">
+              <button className="zx-btn-outline text-sm" onClick={()=>open(o.id)} data-testid={`admin-open-order-${o.order_number}`}>Open order record</button>
+            </div>
+          </article>
         ))}
-        {items.length===0 && <tr><td colSpan="7" className="text-center text-[#6B7280] py-6">No orders match the current filters.</td></tr>}
-      </tbody></table></div>
+        {items.length===0 && <div className="rounded-xl border border-dashed border-[#CBD5E1] bg-white py-10 text-center text-sm text-[#6B7280]">No orders match the current filters.</div>}
+      </div>
       {sel && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-40 overflow-auto" onClick={()=>setSel(null)}>
           <div className="bg-white max-w-2xl w-full p-6 border my-6" onClick={e=>e.stopPropagation()}>
@@ -410,28 +432,34 @@ function Payments() {
         <button onClick={()=>setTab("pending_verification")} className={`px-3 py-2 text-sm border-b-2 ${tab==="pending_verification"?"border-[#00509E] text-[#00509E] font-semibold":"border-transparent text-[#0A1128]"}`} data-testid="payments-tab-pending">Pending Online Payments</button>
         <button onClick={()=>setTab("unpaid")} className={`px-3 py-2 text-sm border-b-2 ${tab==="unpaid"?"border-[#00509E] text-[#00509E] font-semibold":"border-transparent text-[#0A1128]"}`} data-testid="payments-tab-unpaid">Awaiting Payment</button>
       </div>
-      <div className="overflow-x-auto mt-4"><table className="zx-table" data-testid="admin-payments-table">
-        <thead>{tab==="pending_verification" ? (
-          <tr><th>Order</th><th>Customer</th><th>Amount</th><th>Status</th></tr>
-        ) : (
-          <tr><th>Order</th><th>Customer</th><th>Amount</th><th>Status</th><th>Last Reminded</th><th></th></tr>
-        )}</thead>
-        <tbody>
-          {items.map(o => tab==="pending_verification" ? (
-            <tr key={o.id}><td>{o.order_number}</td><td>{o.customer_name} <div className="text-xs text-[#6B7280]">{o.customer_email}</div></td><td>₹{Number(o.amount).toLocaleString('en-IN')}</td><td><StatusBadge status={o.payment_status}/></td></tr>
-          ) : (
-            <tr key={o.id}>
-              <td>{o.order_number}</td>
-              <td>{o.customer_name} <div className="text-xs text-[#6B7280]">{o.customer_email}</div></td>
-              <td>₹{Number(o.amount).toLocaleString('en-IN')}</td>
-              <td><StatusBadge status={o.payment_status}/></td>
-              <td className="text-xs">{o.last_reminded_at ? new Date(o.last_reminded_at).toLocaleString() : "—"}</td>
-              <td><button onClick={()=>remindOne(o.id)} className="zx-link text-sm" data-testid={`remind-${o.order_number}`}>Send reminder</button></td>
-            </tr>
-          ))}
-          {items.length===0 && <tr><td colSpan={tab==="pending_verification"?4:6} className="py-6 text-center text-[#6B7280]">Nothing here.</td></tr>}
-        </tbody>
-      </table></div>
+      <div className="mt-4 space-y-3" data-testid="admin-payments-table">
+        {items.map(o => (
+          <article key={o.id} className="rounded-xl border border-[#DCE3EC] bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wider text-[#6B7280]">{o.order_number}</div>
+                <div className="mt-1 font-semibold text-[#0A1128]">{o.customer_name}</div>
+                <div className="text-xs text-[#6B7280] break-all">{o.customer_email}</div>
+              </div>
+              <div className="text-right">
+                <div className="text-xs text-[#6B7280]">Amount</div>
+                <div className="font-serif text-xl font-bold text-[#0A1128]">₹{Number(o.amount).toLocaleString('en-IN')}</div>
+              </div>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[#E5E7EB] pt-3">
+              <StatusBadge status={o.payment_status}/>
+              {tab==="unpaid" ? (
+                <div className="text-right">
+                  <div className="text-[11px] text-[#6B7280]">Last reminded</div>
+                  <div className="text-xs text-[#4B5563]">{o.last_reminded_at ? new Date(o.last_reminded_at).toLocaleString() : "Not reminded"}</div>
+                  <button onClick={()=>remindOne(o.id)} className="zx-link text-sm mt-2" data-testid={`remind-${o.order_number}`}>Send reminder</button>
+                </div>
+              ) : <span className="text-xs text-[#6B7280]">Awaiting provider confirmation</span>}
+            </div>
+          </article>
+        ))}
+        {items.length===0 && <div className="rounded-xl border border-dashed border-[#CBD5E1] bg-white py-10 text-center text-sm text-[#6B7280]">Nothing here.</div>}
+      </div>
     </div>
   );
 }
