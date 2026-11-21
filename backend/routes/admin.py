@@ -78,9 +78,9 @@ async def stats(admin=Depends(require_admin)):
     total_customers = await db.users.count_documents({"role": "customer"})
     new_enquiries = await db.enquiries.count_documents({"status": "new"})
     active_orders = await db.orders.count_documents({"order_status": {"$in": [
-        "CREATED", "PAYMENT_SUBMITTED", "PAYMENT_VERIFIED", "WORK_STARTED", "IN_PROGRESS", "READY_FOR_DELIVERY"
+        "CREATED", "PAYMENT_PENDING", "PAYMENT_SUBMITTED", "PAYMENT_VERIFIED", "WORK_STARTED", "IN_PROGRESS", "READY_FOR_DELIVERY"
     ]}})
-    pending_payments = await db.orders.count_documents({"payment_status": "PENDING_VERIFICATION"})
+    pending_payments = await db.orders.count_documents({"payment_status": {"$in": ["PENDING_VERIFICATION", "PAYMENT_PENDING"]}})
     verified_payments = await db.orders.count_documents({"payment_status": "PAYMENT_VERIFIED"})
     completed_orders = await db.orders.count_documents({"order_status": "COMPLETED"})
     total_orders = await db.orders.count_documents({})
