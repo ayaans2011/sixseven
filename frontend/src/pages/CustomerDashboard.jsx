@@ -220,6 +220,7 @@ function PaymentForm({ orderId, amount, onDone }) {
   const [payment, setPayment] = useState(null);
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [visible, setVisible] = useState(true);
 
   useEffect(() => {
     api.get("/orders/" + orderId + "/payment/status").then(({ data }) => {
@@ -254,6 +255,8 @@ function PaymentForm({ orderId, amount, onDone }) {
     finally { setChecking(false); }
   };
 
+  if (!visible) return null;
+
   return (
     <div className="fixed inset-0 z-[70] bg-[#0A1128]/55 backdrop-blur-sm flex items-center justify-center p-3 sm:p-5" onClick={e=>e.stopPropagation()} data-testid={"payment-form-" + orderId}>
       <section className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl border border-[#DCE3EC] bg-white shadow-2xl">
@@ -263,7 +266,7 @@ function PaymentForm({ orderId, amount, onDone }) {
             <h3 className="mt-1 font-serif text-xl font-bold text-[#0A1128]">Choose how to pay</h3>
             <p className="mt-1 text-xs text-[#6B7280]">Order {orderId}</p>
           </div>
-          <button type="button" onClick={onDone} className="rounded-full border border-[#DCE3EC] px-3 py-1.5 text-sm text-[#4B5563] hover:bg-white" aria-label="Close payment window">Close</button>
+          <button type="button" onClick={()=>setVisible(false)} className="rounded-full border border-[#DCE3EC] px-3 py-1.5 text-sm text-[#4B5563] hover:bg-white" aria-label="Close payment window">Close</button>
         </div>
         <div className="p-5 space-y-4">
           <div className="rounded-xl border border-[#DCE3EC] bg-[#F8F9FA] p-4 flex items-center justify-between gap-3">
