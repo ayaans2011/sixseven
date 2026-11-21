@@ -227,7 +227,7 @@ def enquiry_response(*, to_email: str, name: str, enquiry_number: str, response_
     _bg_send(to=to_email, subject=subject, html=_wrap(inner))
 
 
-def order_created(*, to_email: str, name: str, order_number: str, service_name: str, amount: float):
+def order_created(*, to_email: str, name: str, order_number: str, tracking_number: str, service_name: str, amount: float):
     subject = f"Order created — {order_number}"
     dash_url = _app_url("/dashboard/orders")
     inner = (
@@ -237,6 +237,7 @@ def order_created(*, to_email: str, name: str, order_number: str, service_name: 
         f'style="background:#f8f9fa;border:1px solid #e5e7eb;padding:14px 18px;margin:14px 0">'
         f'<tr><td style="font-size:13px">'
         f'<b>Order:</b> {escape(order_number)}<br>'
+        f'<b>Tracking token:</b> {escape(tracking_number)}<br>'
         f'<b>Service:</b> {escape(service_name)}<br>'
         f'<b>Amount:</b> ₹{amount:,.0f}</td></tr></table>'
         f'{_button(dash_url, "Open your dashboard") if dash_url else ""}'
