@@ -252,7 +252,7 @@ async def create_famgateway_payment(oid: str, user=Depends(get_current_user)):
     existing = await db.payments.find_one({"order_id": oid, "provider": "famgateway",
         "status": "PAYMENT_PENDING", "expires_at": {"$gt": now}})
     if existing:
-        return {"order_id": existing["provider_order_id"], "amount": amount,
+        return {"order_id": existing["provider_order_id"], "amount": amount, "payable_amount": existing.get("amount", amount),
             "upi_intent": existing.get("upi_intent"), "checkout_url": existing.get("checkout_url"),
             "qr_url": existing.get("qr_url"), "expires_at": existing.get("expires_at")}
     frontend = os.environ.get("FRONTEND_URL", "https://zeroaxis.in").rstrip("/")
@@ -268,12 +268,18 @@ async def create_famgateway_payment(oid: str, user=Depends(get_current_user)):
     provider_id = str(gateway.get("order_id") or "").strip()
     if not provider_id or not (gateway.get("upi_intent") or gateway.get("checkout_url")):
         raise HTTPException(status_code=502, detail="Payment provider returned incomplete checkout details")
-    if not _amount_matches(gateway.get("payable_amount", gateway.get("amount")), amount):
-        raise HTTPException(status_code=502, detail="Payment provider returned a different amount")
+    if gateway.get("amount") is not None and not _amount_matches(gateway.get("amount"), amount):
+        raise HTTPException(status_code=502, detail="Payment provider returned a different base amount")
+    try:
+        payable_amount = round(float(gateway.get("payable_amount", gateway.get("amount", amount))), 2)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=502, detail="Payment provider returned an invalid payable amount")
+    if payable_amount <= 0:
+        raise HTTPException(status_code=502, detail="Payment provider returned an invalid payable amount")
     from datetime import timedelta
     expires_at = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
     payment = {"order_id": oid, "customer_id": user["id"], "provider": "famgateway",
-        "provider_order_id": provider_id, "method": "UPI", "amount": amount,
+        "provider_order_id": provider_id, "method": "UPI", "amount": payable_amount, "order_amount": amount,
         "status": "PAYMENT_PENDING", "upi_intent": gateway.get("upi_intent"),
         "checkout_url": gateway.get("checkout_url"), "qr_url": gateway.get("qr_url"),
         "expires_at": expires_at, "created_at": now}
@@ -284,7 +290,7 @@ async def create_famgateway_payment(oid: str, user=Depends(get_current_user)):
         user["id"], user["email"], "FamGateway checkout created")
     await audit_log("famgateway_checkout_created", user["id"], user["email"], "order", oid,
         {"provider_order_id": provider_id})
-    return {"order_id": provider_id, "amount": amount, "upi_intent": gateway.get("upi_intent"),
+    return {"order_id": provider_id, "amount": amount, "payable_amount": payable_amount, "upi_intent": gateway.get("upi_intent"),
         "checkout_url": gateway.get("checkout_url"), "qr_url": gateway.get("qr_url"), "expires_at": expires_at}
 
 @router.get("/{oid}/payment/status")
@@ -307,7 +313,7 @@ async def check_famgateway_payment(oid: str, user=Depends(get_current_user)):
     gateway = _gateway_data(response)
     status = str(gateway.get("status") or response.get("status") or "").lower()
     if status == "success" or gateway.get("is_paid") is True:
-        if not _amount_matches(gateway.get("amount", gateway.get("payable_amount", payment["amount"])), payment["amount"]):
+        if not _amount_matches(gateway.get("payable_amount", gateway.get("amount", payment["amount"])), payment["amount"]):
             raise HTTPException(status_code=409, detail="Verified payment amount mismatch")
         await _mark_famgateway_paid(db, payment, order, gateway)
         return {"status": "success", "payment_status": "PAYMENT_VERIFIED"}
@@ -319,7 +325,7 @@ async def check_famgateway_payment(oid: str, user=Depends(get_current_user)):
             {"$set": {"payment_status": "UNPAID", "order_status": "CREATED", "updated_at": now}})
         return {"status": "expired", "payment_status": "UNPAID"}
     return {"status": "pending", "payment_status": "PAYMENT_PENDING", "checkout": {
-        "order_id": payment.get("provider_order_id"), "amount": payment.get("amount"),
+        "order_id": payment.get("provider_order_id"), "amount": payment.get("order_amount", payment.get("amount")), "payable_amount": payment.get("amount"),
         "upi_intent": payment.get("upi_intent"), "checkout_url": payment.get("checkout_url"),
         "qr_url": payment.get("qr_url"), "expires_at": payment.get("expires_at")}}
 
@@ -349,14 +355,14 @@ async def famgateway_webhook(request: Request):
     order = await db.orders.find_one({"_id": ObjectId(payment["order_id"])})
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    if not _amount_matches(event.get("amount", event.get("payable_amount")), payment["amount"]):
+    if not _amount_matches(event.get("payable_amount", event.get("amount")), payment["amount"]):
         raise HTTPException(status_code=409, detail="Webhook amount mismatch")
     confirmed_response = await _famgateway_request("GET", "/api/verify-order.php",
         params={"order_id": provider_id})
     confirmed = _gateway_data(confirmed_response)
     if str(confirmed.get("status") or confirmed_response.get("status") or "").lower() != "success" and confirmed.get("is_paid") is not True:
         raise HTTPException(status_code=409, detail="Provider has not confirmed this payment")
-    if not _amount_matches(confirmed.get("amount", confirmed.get("payable_amount")), payment["amount"]):
+    if not _amount_matches(confirmed.get("payable_amount", confirmed.get("amount")), payment["amount"]):
         raise HTTPException(status_code=409, detail="Verified payment amount mismatch")
     await _mark_famgateway_paid(db, payment, order, confirmed)
     return {"status": "received"}
