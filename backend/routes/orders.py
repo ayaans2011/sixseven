@@ -97,7 +97,7 @@ async def create_order(data: OrderIn, user=Depends(get_current_user)):
     await audit_log("order_created", user["id"], user["email"], "order", str(res.inserted_id), {"number": number})
     email_svc.order_created(
         to_email=user["email"], name=user.get("name", ""),
-        order_number=number, service_name=service["name"], amount=float(service.get("price", 0)),
+        order_number=number, tracking_number=tracking_token, service_name=service["name"], amount=float(service.get("price", 0)),
     )
     return _serialize(doc)
 
