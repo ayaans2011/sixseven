@@ -149,7 +149,8 @@ async def get_customer_record(uid: str, admin=Depends(require_admin)):
     notifications = await db.notifications.find({"user_id": uid}).sort("created_at", -1).to_list(300)
     files = await db.files.find({"parent_id": {"$in": order_ids + enquiry_ids}, "is_deleted": {"$ne": True}}).sort("created_at", -1).to_list(500)
     messages = await db.messages.find({"parent_id": {"$in": order_ids + enquiry_ids}}).sort("created_at", -1).to_list(500)
-    audits = await db.audit_logs.find({"target_id": uid}).sort("timestamp", -1).to_list(200)
+    audit_target_ids = [uid] + order_ids + enquiry_ids + [str(t["_id"]) for t in support]
+    audits = await db.audit_logs.find({"target_id": {"$in": audit_target_ids}}).sort("timestamp", -1).to_list(500)
 
     profile = {
         "id": uid, "name": customer.get("name"), "email": email,
@@ -196,6 +197,7 @@ async def get_customer_record(uid: str, admin=Depends(require_admin)):
     } for n in notifications]
     audit_rows = [{
         "action": a.get("action"), "actor_email": a.get("actor_email"),
+        "target_type": a.get("target_type"), "target_id": a.get("target_id"),
         "metadata": a.get("metadata", {}), "timestamp": a.get("timestamp"),
     } for a in audits]
     await audit_log("customer_record_viewed", admin["id"], admin["email"], "user", uid)
