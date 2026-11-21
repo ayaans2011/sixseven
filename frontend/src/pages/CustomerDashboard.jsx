@@ -258,7 +258,7 @@ function PaymentForm({ orderId, amount, onDone }) {
   return (
     <div className="space-y-3 mt-3" data-testid={"payment-form-" + orderId}>
       <div className="text-sm text-[#4B5563]">Pay securely through FamGateway. The amount is fixed to the order total.</div>
-      <div className="text-sm font-semibold text-[#0A1128]">Amount: ₹{Number(amount).toLocaleString("en-IN")}</div>
+      <div className="text-sm font-semibold text-[#0A1128]">Amount to pay: ₹{Number(payment?.payable_amount || amount).toLocaleString("en-IN")}</div>
       {!payment ? (
         <button type="button" disabled={busy} onClick={createCheckout} className="zx-btn-primary" data-testid={"payment-submit-" + orderId}>
           {busy ? "Creating checkout…" : "Continue to UPI payment"}
