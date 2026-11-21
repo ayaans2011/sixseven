@@ -79,7 +79,7 @@ function FileAttachments({ parentType, parentId }) {
 
 function StatusBadge({ status }) {
   const map = {
-    UNPAID: "gray", PAYMENT_SUBMITTED: "amber", PENDING_VERIFICATION: "amber", PAYMENT_PENDING: "amber", PAYMENT_PENDING: "amber",
+    UNPAID: "gray", PAYMENT_SUBMITTED: "amber", PENDING_VERIFICATION: "amber", PAYMENT_PENDING: "amber",
     PAYMENT_VERIFIED: "green", PAYMENT_REJECTED: "red", REFUNDED: "gray",
     CREATED: "blue", WORK_STARTED: "blue", IN_PROGRESS: "blue",
     READY_FOR_DELIVERY: "amber", COMPLETED: "green", CANCELLED: "red",
@@ -407,7 +407,7 @@ function Payments() {
         )}
       </div>
       <div className="mt-3 flex gap-1 border-b border-[#E5E7EB]">
-        <button onClick={()=>setTab("pending_verification")} className={`px-3 py-2 text-sm border-b-2 ${tab==="pending_verification"?"border-[#00509E] text-[#00509E] font-semibold":"border-transparent text-[#0A1128]"}`} data-testid="payments-tab-pending">Pending Verification</button>
+        <button onClick={()=>setTab("pending_verification")} className={`px-3 py-2 text-sm border-b-2 ${tab==="pending_verification"?"border-[#00509E] text-[#00509E] font-semibold":"border-transparent text-[#0A1128]"}`} data-testid="payments-tab-pending">Pending Online Payments</button>
         <button onClick={()=>setTab("unpaid")} className={`px-3 py-2 text-sm border-b-2 ${tab==="unpaid"?"border-[#00509E] text-[#00509E] font-semibold":"border-transparent text-[#0A1128]"}`} data-testid="payments-tab-unpaid">Awaiting Payment</button>
       </div>
       <div className="overflow-x-auto mt-4"><table className="zx-table" data-testid="admin-payments-table">
