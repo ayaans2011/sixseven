@@ -11,19 +11,6 @@ from services import email as email_svc
 router = APIRouter(prefix="/api", tags=["admin_content"])
 
 
-class QRUploadIn(BaseModel):
-    data_url: str  # data:image/png;base64,...
-    label: str | None = ""
-
-
-def _validate_data_url(data_url: str):
-    if not data_url.startswith("data:image/"):
-        raise HTTPException(status_code=400, detail="Must be an image data URL (data:image/...;base64,...)")
-    # Size guard ~ 2MB base64
-    if len(data_url) > 3_000_000:
-        raise HTTPException(status_code=400, detail="Image too large (max ~2MB)")
-
-
 # ---------- Website Content ----------
 @router.get("/content")
 async def list_content():
@@ -65,105 +52,8 @@ async def list_customers(admin=Depends(require_admin)):
         "phone": u.get("phone"),
         "company": u.get("company"),
         "disabled": u.get("disabled", False),
-        "has_qr": bool(u.get("payment_qr")),
-        "payment_qr_label": u.get("payment_qr_label", ""),
         "created_at": u.get("created_at"),
     } for u in items]
-
-
-@router.put("/admin/customers/{uid}/qr")
-async def set_customer_qr(uid: str, data: QRUploadIn, admin=Depends(require_admin)):
-    _validate_data_url(data.data_url)
-    db = get_db()
-    try:
-        u = await db.users.find_one({"_id": ObjectId(uid)})
-    except Exception:
-        raise HTTPException(status_code=404, detail="Not found")
-    if not u or u.get("role") != "customer":
-        raise HTTPException(status_code=404, detail="Not found")
-    await db.users.update_one({"_id": u["_id"]}, {"$set": {
-        "payment_qr": data.data_url,
-        "payment_qr_label": data.label or "",
-    }})
-    await audit_log("customer_qr_set", admin["id"], admin["email"], "user", uid)
-    return {"success": True}
-
-
-@router.delete("/admin/customers/{uid}/qr")
-async def clear_customer_qr(uid: str, admin=Depends(require_admin)):
-    db = get_db()
-    try:
-        await db.users.update_one({"_id": ObjectId(uid)}, {"$unset": {"payment_qr": "", "payment_qr_label": ""}})
-    except Exception:
-        raise HTTPException(status_code=404, detail="Not found")
-    await audit_log("customer_qr_cleared", admin["id"], admin["email"], "user", uid)
-    return {"success": True}
-
-
-@router.get("/admin/customers/{uid}/qr")
-async def get_customer_qr_admin(uid: str, admin=Depends(require_admin)):
-    db = get_db()
-    try:
-        u = await db.users.find_one({"_id": ObjectId(uid)})
-    except Exception:
-        raise HTTPException(status_code=404, detail="Not found")
-    if not u:
-        raise HTTPException(status_code=404, detail="Not found")
-    return {"data_url": u.get("payment_qr"), "label": u.get("payment_qr_label", "")}
-
-
-@router.get("/orders/{oid}/qr")
-async def get_order_qr(oid: str, user=Depends(get_current_user)):
-    """Returns the QR image for an order. Prefers order-specific QR, falls back to customer's default QR."""
-    db = get_db()
-    try:
-        o = await db.orders.find_one({"_id": ObjectId(oid)})
-    except Exception:
-        raise HTTPException(status_code=404, detail="Not found")
-    if not o:
-        raise HTTPException(status_code=404, detail="Not found")
-    if user["role"] != "admin" and o.get("customer_id") != user["id"]:
-        raise HTTPException(status_code=403, detail="Forbidden")
-    data_url = o.get("payment_qr")
-    label = o.get("payment_qr_label", "")
-    if not data_url and o.get("customer_id"):
-        try:
-            cu = await db.users.find_one({"_id": ObjectId(o["customer_id"])})
-            if cu:
-                data_url = cu.get("payment_qr")
-                label = cu.get("payment_qr_label", label)
-        except Exception:
-            pass
-    return {"data_url": data_url, "label": label}
-
-
-@router.put("/admin/orders/{oid}/qr")
-async def set_order_qr(oid: str, data: QRUploadIn, admin=Depends(require_admin)):
-    _validate_data_url(data.data_url)
-    db = get_db()
-    try:
-        o = await db.orders.find_one({"_id": ObjectId(oid)})
-    except Exception:
-        raise HTTPException(status_code=404, detail="Not found")
-    if not o:
-        raise HTTPException(status_code=404, detail="Not found")
-    await db.orders.update_one({"_id": o["_id"]}, {"$set": {
-        "payment_qr": data.data_url,
-        "payment_qr_label": data.label or "",
-    }})
-    await audit_log("order_qr_set", admin["id"], admin["email"], "order", oid)
-    return {"success": True}
-
-
-@router.delete("/admin/orders/{oid}/qr")
-async def clear_order_qr(oid: str, admin=Depends(require_admin)):
-    db = get_db()
-    try:
-        await db.orders.update_one({"_id": ObjectId(oid)}, {"$unset": {"payment_qr": "", "payment_qr_label": ""}})
-    except Exception:
-        raise HTTPException(status_code=404, detail="Not found")
-    await audit_log("order_qr_cleared", admin["id"], admin["email"], "order", oid)
-    return {"success": True}
 
 
 @router.post("/admin/customers/{uid}/toggle")
@@ -188,9 +78,9 @@ async def stats(admin=Depends(require_admin)):
     total_customers = await db.users.count_documents({"role": "customer"})
     new_enquiries = await db.enquiries.count_documents({"status": "new"})
     active_orders = await db.orders.count_documents({"order_status": {"$in": [
-        "CREATED", "PAYMENT_SUBMITTED", "PAYMENT_VERIFIED", "WORK_STARTED", "IN_PROGRESS", "READY_FOR_DELIVERY"
+        "CREATED", "PAYMENT_PENDING", "PAYMENT_SUBMITTED", "PAYMENT_VERIFIED", "WORK_STARTED", "IN_PROGRESS", "READY_FOR_DELIVERY"
     ]}})
-    pending_payments = await db.orders.count_documents({"payment_status": "PENDING_VERIFICATION"})
+    pending_payments = await db.orders.count_documents({"payment_status": {"$in": ["PENDING_VERIFICATION", "PAYMENT_PENDING"]}})
     verified_payments = await db.orders.count_documents({"payment_status": "PAYMENT_VERIFIED"})
     completed_orders = await db.orders.count_documents({"order_status": "COMPLETED"})
     total_orders = await db.orders.count_documents({})

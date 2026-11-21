@@ -27,7 +27,7 @@ async def _generate_report(period_days: int = 30) -> dict:
     ).to_list(5000)
 
     verified_orders = [o for o in orders_period if o.get("payment_status") == "PAYMENT_VERIFIED"]
-    pending = [o for o in orders_period if o.get("payment_status") == "PENDING_VERIFICATION"]
+    pending = [o for o in orders_period if o.get("payment_status") in ("PENDING_VERIFICATION", "PAYMENT_PENDING")]
     completed = [o for o in orders_period if o.get("order_status") == "COMPLETED"]
 
     revenue = sum(float(o.get("amount", 0) or 0) for o in verified_orders)

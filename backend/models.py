@@ -89,17 +89,6 @@ class OrderStatusUpdate(BaseModel):
     note: Optional[str] = ""
 
 
-class PaymentSubmitIn(BaseModel):
-    method: str
-    reference: str
-    amount: float
-    note: Optional[str] = ""
-
-
-class PaymentVerifyIn(BaseModel):
-    action: str
-    note: Optional[str] = ""
-
 
 # ---------- Notifications ----------
 class NotificationIn(BaseModel):
@@ -124,6 +113,7 @@ ORDER_STATUSES = [
     "CREATED",
     "PAYMENT_SUBMITTED",
     "PENDING_VERIFICATION",
+    "PAYMENT_PENDING",
     "PAYMENT_VERIFIED",
     "WORK_STARTED",
     "IN_PROGRESS",
@@ -136,6 +126,7 @@ PAYMENT_STATUSES = [
     "UNPAID",
     "PAYMENT_SUBMITTED",
     "PENDING_VERIFICATION",
+    "PAYMENT_PENDING",
     "PAYMENT_VERIFIED",
     "PAYMENT_REJECTED",
     "REFUNDED",

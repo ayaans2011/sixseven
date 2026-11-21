@@ -79,7 +79,7 @@ function FileAttachments({ parentType, parentId }) {
 
 function StatusBadge({ status }) {
   const map = {
-    UNPAID: "gray", PAYMENT_SUBMITTED: "amber", PENDING_VERIFICATION: "amber",
+    UNPAID: "gray", PAYMENT_SUBMITTED: "amber", PENDING_VERIFICATION: "amber", PAYMENT_PENDING: "amber",
     PAYMENT_VERIFIED: "green", PAYMENT_REJECTED: "red", REFUNDED: "gray",
     CREATED: "blue", WORK_STARTED: "blue", IN_PROGRESS: "blue",
     READY_FOR_DELIVERY: "amber", COMPLETED: "green", CANCELLED: "red",
@@ -114,90 +114,27 @@ function Dash() {
   );
 }
 
-function CustomerQRModal({ customer, onClose, onSaved }) {
-  const [dataUrl, setDataUrl] = useState("");
-  const [label, setLabel] = useState("");
-  const [existing, setExisting] = useState(null);
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    api.get(`/admin/customers/${customer.id}/qr`).then(r => {
-      setExisting(r.data);
-      setLabel(r.data?.label || "");
-    });
-  }, [customer.id]);
-  const onFile = (e) => {
-    const f = e.target.files?.[0]; if (!f) return;
-    if (!f.type.startsWith("image/")) return toast.error("Please pick an image");
-    if (f.size > 2 * 1024 * 1024) return toast.error("Max 2MB");
-    const rd = new FileReader(); rd.onload = () => setDataUrl(rd.result); rd.readAsDataURL(f);
-  };
-  const save = async () => {
-    if (!dataUrl && !existing?.data_url) return toast.error("Pick an image first");
-    setBusy(true);
-    try {
-      await api.put(`/admin/customers/${customer.id}/qr`, { data_url: dataUrl || existing.data_url, label });
-      toast.success("QR saved"); onSaved && onSaved(); onClose();
-    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
-    finally { setBusy(false); }
-  };
-  const remove = async () => {
-    if (!confirm("Remove QR for this customer?")) return;
-    await api.delete(`/admin/customers/${customer.id}/qr`);
-    toast.success("QR removed"); onSaved && onSaved(); onClose();
-  };
-  const preview = dataUrl || existing?.data_url;
-  return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-40" onClick={onClose}>
-      <div className="bg-white max-w-lg w-full p-6 border" onClick={e=>e.stopPropagation()} data-testid="customer-qr-modal">
-        <div className="font-serif text-lg font-bold">Payment QR for {customer.name}</div>
-        <div className="text-xs text-[#6B7280]">{customer.email}</div>
-        <div className="mt-4 grid grid-cols-2 gap-4">
-          <div>
-            <label className="zx-label">QR image (PNG/JPG)</label>
-            <input type="file" accept="image/*" onChange={onFile} className="zx-input" data-testid="customer-qr-file" />
-            <label className="zx-label mt-3">Label / UPI ID (optional)</label>
-            <input className="zx-input" value={label} onChange={e=>setLabel(e.target.value)} placeholder="e.g. zeroaxis@upi" data-testid="customer-qr-label" />
-          </div>
-          <div>
-            <div className="zx-label">Preview</div>
-            {preview ? <img src={preview} alt="QR" className="w-40 h-40 object-contain border border-[#E5E7EB] bg-white p-1" /> : <div className="w-40 h-40 border border-dashed border-[#E5E7EB] flex items-center justify-center text-xs text-[#6B7280]">No image</div>}
-          </div>
-        </div>
-        <div className="mt-4 flex gap-2 justify-end">
-          {existing?.data_url && <button className="zx-btn-outline" onClick={remove} data-testid="customer-qr-remove">Remove</button>}
-          <button className="zx-btn-outline" onClick={onClose}>Cancel</button>
-          <button className="zx-btn-primary" onClick={save} disabled={busy} data-testid="customer-qr-save">{busy?"Saving…":"Save QR"}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function Customers() {
   const [items, setItems] = useState([]);
-  const [qrFor, setQrFor] = useState(null);
   const load = () => api.get("/admin/customers").then(r=>setItems(r.data));
   useEffect(()=>{ load(); },[]);
   const toggle = async (id) => { await api.post(`/admin/customers/${id}/toggle`); load(); };
   return (
     <div>
       <h2 className="font-serif text-2xl font-bold text-[#0A1128]">Customers</h2>
-      <div className="overflow-x-auto mt-4"><table className="zx-table" data-testid="admin-customers-table"><thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Payment QR</th><th>Status</th><th>Joined</th><th></th></tr></thead><tbody>
+      <div className="overflow-x-auto mt-4"><table className="zx-table" data-testid="admin-customers-table"><thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Status</th><th>Joined</th><th></th></tr></thead><tbody>
         {items.map(u => (
           <tr key={u.id}>
             <td>{u.name}</td><td>{u.email}</td><td>{u.phone||"—"}</td>
-            <td>{u.has_qr ? <span className="zx-badge zx-badge-green">Uploaded</span> : <span className="zx-badge zx-badge-gray">Not set</span>}</td>
             <td>{u.disabled ? <StatusBadge status="CANCELLED" /> : <StatusBadge status="COMPLETED" />}</td>
             <td>{u.created_at ? new Date(u.created_at).toLocaleDateString() : "—"}</td>
             <td className="flex gap-3">
-              <button onClick={()=>setQrFor(u)} className="zx-link text-sm" data-testid={`qr-customer-${u.id}`}>{u.has_qr?"Update QR":"Upload QR"}</button>
               <button onClick={()=>toggle(u.id)} className="zx-link text-sm" data-testid={`toggle-customer-${u.id}`}>{u.disabled?"Enable":"Disable"}</button>
             </td>
           </tr>
         ))}
-        {items.length===0 && <tr><td colSpan="7" className="text-center py-6 text-[#6B7280]">No customers yet.</td></tr>}
+        {items.length===0 && <tr><td colSpan="6" className="text-center py-6 text-[#6B7280]">No customers yet.</td></tr>}
       </tbody></table></div>
-      {qrFor && <CustomerQRModal customer={qrFor} onClose={()=>setQrFor(null)} onSaved={load} />}
     </div>
   );
 }
@@ -278,57 +215,7 @@ function Enquiries() {
   );
 }
 
-function AdminOrderQRBlock({ orderId }) {
-  const [qr, setQr] = useState(null);
-  const [dataUrl, setDataUrl] = useState("");
-  const [label, setLabel] = useState("");
-  const [busy, setBusy] = useState(false);
-  const load = () => api.get(`/orders/${orderId}/qr`).then(r=>setQr(r.data));
-  useEffect(()=>{ load(); }, [orderId]);
-  const onFile = (e) => {
-    const f = e.target.files?.[0]; if (!f) return;
-    if (!f.type.startsWith("image/")) return toast.error("Please pick an image");
-    if (f.size > 2 * 1024 * 1024) return toast.error("Max 2MB");
-    const rd = new FileReader(); rd.onload = () => setDataUrl(rd.result); rd.readAsDataURL(f);
-  };
-  const save = async () => {
-    if (!dataUrl) return toast.error("Pick an image first");
-    setBusy(true);
-    try {
-      await api.put(`/admin/orders/${orderId}/qr`, { data_url: dataUrl, label });
-      toast.success("Order QR set"); setDataUrl(""); load();
-    } catch(e){ toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
-    finally { setBusy(false); }
-  };
-  const clearIt = async () => {
-    if (!confirm("Remove order-specific QR? (customer default will apply)")) return;
-    await api.delete(`/admin/orders/${orderId}/qr`);
-    toast.success("Removed"); load();
-  };
-  return (
-    <div className="zx-card mt-4">
-      <div className="font-semibold text-sm text-[#0A1128]">Payment QR</div>
-      <div className="text-xs text-[#6B7280]">Order-specific QR overrides the customer default.</div>
-      <div className="mt-3 flex items-start gap-4">
-        {qr?.data_url ? (
-          <img src={qr.data_url} alt="QR" className="w-32 h-32 object-contain border border-[#E5E7EB] bg-white p-1" />
-        ) : (
-          <div className="w-32 h-32 border border-dashed border-[#E5E7EB] flex items-center justify-center text-xs text-[#6B7280]">No QR</div>
-        )}
-        <div className="flex-1 space-y-2">
-          <input type="file" accept="image/*" onChange={onFile} className="zx-input" data-testid={`order-qr-file-${orderId}`} />
-          <input className="zx-input" placeholder="Label (e.g. UPI ID) — optional" value={label} onChange={e=>setLabel(e.target.value)} />
-          <div className="flex gap-2">
-            <button className="zx-btn-primary" onClick={save} disabled={busy || !dataUrl} data-testid={`order-qr-save-${orderId}`}>Upload / Replace</button>
-            {qr?.data_url && <button className="zx-btn-outline" onClick={clearIt}>Clear</button>}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-const ORDER_STATUSES = ["CREATED","PAYMENT_SUBMITTED","PAYMENT_VERIFIED","WORK_STARTED","IN_PROGRESS","READY_FOR_DELIVERY","COMPLETED","CANCELLED"];
+const ORDER_STATUSES = ["CREATED","PAYMENT_PENDING","PAYMENT_SUBMITTED","PAYMENT_VERIFIED","WORK_STARTED","IN_PROGRESS","READY_FOR_DELIVERY","COMPLETED","CANCELLED"];
 
 function Orders() {
   const [items, setItems] = useState([]);
@@ -438,23 +325,10 @@ function Orders() {
               </button>
             )}
 
-            <AdminOrderQRBlock orderId={sel.id} />
             <FileAttachments parentType="order" parentId={sel.id} />
             <MessagesThread parentType="order" parentId={sel.id} />
 
-            {sel.payment_status === "PENDING_VERIFICATION" && (
-              <div className="zx-card mt-4">
-                <div className="font-semibold text-sm text-[#0A1128]">Payment to verify</div>
-                {(sel.payments||[]).filter(p=>p.status==="PENDING_VERIFICATION").map(p=>(
-                  <div key={p.id} className="text-sm text-[#4B5563] mt-1">Method: {p.method} · Ref: {p.reference} · Amount: ₹{p.amount}</div>
-                ))}
-                <textarea rows={2} className="zx-input mt-2" placeholder="Verification note (optional)" value={note} onChange={e=>setNote(e.target.value)} />
-                <div className="mt-2 flex gap-2">
-                  <button className="zx-btn-primary" onClick={()=>verifyPayment("verify")} data-testid="verify-payment-btn">Verify</button>
-                  <button className="zx-btn-outline" onClick={()=>verifyPayment("reject")} data-testid="reject-payment-btn">Reject</button>
-                </div>
-              </div>
-            )}
+            {sel.payment_status === "PAYMENT_PENDING" && <div className="zx-card mt-4 text-sm">Payment awaiting automatic FamGateway confirmation. No manual approval is required.</div>}
 
             <div className="mt-4">
               <div className="font-semibold text-sm">Update Status</div>
@@ -493,7 +367,7 @@ function Payments() {
   const [tab, setTab] = useState("pending_verification"); // or "unpaid"
   const load = async () => {
     if (tab === "pending_verification") {
-      const { data } = await api.get("/orders/admin/all?payment_status=PENDING_VERIFICATION");
+      const { data } = await api.get("/orders/admin/all?payment_status=PAYMENT_PENDING");
       setItems(data);
     } else {
       const { data } = await api.get("/admin/payments/pending");
@@ -533,7 +407,7 @@ function Payments() {
         )}
       </div>
       <div className="mt-3 flex gap-1 border-b border-[#E5E7EB]">
-        <button onClick={()=>setTab("pending_verification")} className={`px-3 py-2 text-sm border-b-2 ${tab==="pending_verification"?"border-[#00509E] text-[#00509E] font-semibold":"border-transparent text-[#0A1128]"}`} data-testid="payments-tab-pending">Pending Verification</button>
+        <button onClick={()=>setTab("pending_verification")} className={`px-3 py-2 text-sm border-b-2 ${tab==="pending_verification"?"border-[#00509E] text-[#00509E] font-semibold":"border-transparent text-[#0A1128]"}`} data-testid="payments-tab-pending">Pending Online Payments</button>
         <button onClick={()=>setTab("unpaid")} className={`px-3 py-2 text-sm border-b-2 ${tab==="unpaid"?"border-[#00509E] text-[#00509E] font-semibold":"border-transparent text-[#0A1128]"}`} data-testid="payments-tab-unpaid">Awaiting Payment</button>
       </div>
       <div className="overflow-x-auto mt-4"><table className="zx-table" data-testid="admin-payments-table">
