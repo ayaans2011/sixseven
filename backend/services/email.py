@@ -263,7 +263,7 @@ def order_created(*, to_email: str, name: str, order_number: str, tracking_numbe
     dash_url = _app_url("/dashboard/orders")
     inner = (
         f'<p>Hi {escape(name or "there")}</p>'
-        f'<p>Your order has been created. Please complete the payment to proceed.</p>'
+        f'<p>We have received your order. Our team will review it, assign a developer and notify you when payment is due.</p>'
         f'<table role="presentation" cellpadding="0" cellspacing="0" '
         f'style="background:#f8f9fa;border:1px solid #e5e7eb;padding:14px 18px;margin:14px 0">'
         f'<tr><td style="font-size:13px">'
