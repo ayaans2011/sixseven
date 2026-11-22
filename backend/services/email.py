@@ -417,3 +417,16 @@ def admin_2fa_recovery_otp(*, to_email: str, name: str, otp: str):
         f'<p>If you did not request this, do not share this code. Your authenticator will not be changed unless the code is verified.</p>'
     )
     _bg_send(to=to_email, subject=subject, html=_wrap(inner))
+
+
+async def send_admin_login_otp(*, to_email: str, name: str, otp: str) -> bool:
+    """Send an administrator sign-in OTP and report delivery failure to the caller."""
+    subject = "ZEROAXIS administrator sign-in code"
+    inner = (
+        f'<p>Hi {escape(name or "Administrator")},</p>'
+        f'<p>Use this one-time code to sign in to the ZEROAXIS administrator account:</p>'
+        f'<p style="font-size:26px;letter-spacing:6px;font-weight:700"><b>{escape(otp)}</b></p>'
+        f'<p>This code expires in <b>5 minutes</b>, is valid once, and must not be shared.</p>'
+        f'<p>If you did not request this code, you can ignore this email and consider changing your administrator password.</p>'
+    )
+    return bool(await _send_email(to=to_email, subject=subject, html=_wrap(inner)))
