@@ -400,8 +400,8 @@ async def submit_manual_payment(oid: str, data: dict, user=Depends(get_current_u
         raise HTTPException(status_code=404, detail="Order or proof not found")
     if proof.get("mime") not in {"application/pdf", "image/jpeg", "image/png", "image/webp"}:
         raise HTTPException(status_code=400, detail="Proof must be a PDF or image")
-    if order.get("payment_status") == "PAYMENT_VERIFIED":
-        raise HTTPException(status_code=409, detail="This order is already paid")
+    if order.get("payment_status") not in {"UNPAID", "PAYMENT_REJECTED"}:
+        raise HTTPException(status_code=409, detail="This order already has a payment in progress or is paid")
     pending = await db.payments.find_one({"order_id": oid, "provider": "manual", "status": "PENDING_VERIFICATION"})
     if pending:
         raise HTTPException(status_code=409, detail="A payment submission is already awaiting review")
@@ -409,12 +409,19 @@ async def submit_manual_payment(oid: str, data: dict, user=Depends(get_current_u
             "status": {"$in": ["PENDING_VERIFICATION", "PAYMENT_VERIFIED"]}}):
         raise HTTPException(status_code=409, detail="This payment reference has already been submitted")
     now = datetime.now(timezone.utc).isoformat()
-    await db.payments.insert_one({"order_id": oid, "customer_id": user["id"], "provider": "manual",
-        "method": method, "reference": reference, "amount": float(order.get("amount", 0)),
-        "status": "PENDING_VERIFICATION", "proof_file_id": proof_id,
-        "proof_name": proof.get("original_name"), "submitted_by": user["email"], "created_at": now})
-    await db.orders.update_one({"_id": order["_id"], "payment_status": {"$ne": "PAYMENT_VERIFIED"}},
+    claim = await db.orders.update_one({"_id": order["_id"], "payment_status": {"$in": ["UNPAID", "PAYMENT_REJECTED"]}},
         {"$set": {"payment_status": "PENDING_VERIFICATION", "updated_at": now}})
+    if not claim.modified_count:
+        raise HTTPException(status_code=409, detail="Order payment status changed. Refresh and try again.")
+    try:
+        await db.payments.insert_one({"order_id": oid, "customer_id": user["id"], "provider": "manual",
+            "method": method, "reference": reference, "amount": float(order.get("amount", 0)),
+            "status": "PENDING_VERIFICATION", "proof_file_id": proof_id,
+            "proof_name": proof.get("original_name"), "submitted_by": user["email"], "created_at": now})
+    except Exception:
+        await db.orders.update_one({"_id": order["_id"], "payment_status": "PENDING_VERIFICATION"},
+            {"$set": {"payment_status": order.get("payment_status", "UNPAID"), "updated_at": now}})
+        raise
     await _add_status_history(db, oid, order.get("order_status", "CREATED"), order.get("order_status", "CREATED"),
         user["id"], user["email"], method.replace("_", " ").title() + " proof submitted for review")
     admins = await db.users.find({"role": "admin", "disabled": {"$ne": True}}, {"_id": 1}).to_list(1000)
