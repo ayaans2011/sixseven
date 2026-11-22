@@ -3,18 +3,15 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, EmailStr
 from bson import ObjectId
 import hashlib
+import hmac
 import secrets
-import base64
-from io import BytesIO
-import qrcode
-from qrcode.image.svg import SvgPathImage
 
 from database import get_db
-from services.email import admin_2fa_recovery_otp
+from services.email import send_admin_login_otp
 from security import (
     verify_password, create_access_token, create_refresh_token, set_auth_cookies,
     check_lockout, record_failed_login, clear_login_attempts, audit_log,
-    admin_network_allowed, generate_totp_secret, verify_totp,
+    admin_network_allowed, get_jwt_secret,
 )
 
 router = APIRouter(prefix="/api/admin-auth", tags=["admin-auth"])
@@ -30,37 +27,10 @@ class AdminOtpIn(BaseModel):
     code: str
 
 
-class AdminSetupIn(BaseModel):
-    challenge: str
-    code: str
-
-
-class AdminRecoveryRequestIn(BaseModel):
-    email: EmailStr
-    password: str
-
-
-class AdminRecoveryVerifyIn(BaseModel):
-    recovery_token: str
-    code: str
-
-
-def _challenge_hash(token: str) -> str:
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
-
-
-async def _record_challenge_failure(db, rec: dict):
-    await db.admin_login_challenges.update_one(
-        {"_id": rec["_id"], "used": False},
-        {"$inc": {"attempts": 1}},
-    )
-    current = await db.admin_login_challenges.find_one({"_id": rec["_id"]})
-    if current and current.get("attempts", 0) >= 5:
-        await db.admin_login_challenges.update_one(
-            {"_id": rec["_id"]},
-            {"$set": {"used": True}},
-        )
-        raise HTTPException(status_code=429, detail="Too many invalid authenticator codes. Start login again.")
+def _digest(value: str) -> str:
+    # Keyed digest prevents a database-only attacker from cheaply enumerating 6-digit OTPs.
+    key = get_jwt_secret().encode("utf-8")
+    return hmac.new(key, value.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 async def _issue_admin_session(response: Response, user: dict):
@@ -69,8 +39,9 @@ async def _issue_admin_session(response: Response, user: dict):
     access = create_access_token(uid, email, "admin")
     refresh = create_refresh_token(uid)
     set_auth_cookies(response, access, refresh)
-    await audit_log("admin_2fa_login", uid, email, "user", uid)
-    return {"id": uid, "email": email, "name": user.get("name", ""), "role": "admin", "two_factor_enabled": True, "access_token": access}
+    await audit_log("admin_email_otp_login", uid, email, "user", uid)
+    return {"id": uid, "email": email, "name": user.get("name", ""), "role": "admin",
+            "two_factor_enabled": True, "access_token": access}
 
 
 @router.post("/login")
@@ -83,183 +54,99 @@ async def admin_login(data: AdminLoginIn, request: Request):
     identifier = f"admin:{ip}:{email}"
     await check_lockout(identifier)
     user = await db.users.find_one({"email": email, "role": "admin"})
-    if not user or not verify_password(data.password, user.get("password_hash", "")):
+    if not user or user.get("disabled") or not verify_password(data.password, user.get("password_hash", "")):
         await record_failed_login(identifier)
         raise HTTPException(status_code=401, detail="Invalid admin credentials")
-    if user.get("disabled"):
-        raise HTTPException(status_code=403, detail="Admin account disabled")
     await clear_login_attempts(identifier)
+
     now = datetime.now(timezone.utc)
-
-    if not user.get("two_factor_secret"):
-        challenge = secrets.token_urlsafe(32)
-        await db.admin_login_challenges.insert_one({
-            "token_hash": _challenge_hash(challenge), "user_id": str(user["_id"]),
-            "purpose": "setup", "expires_at": now + timedelta(minutes=10),
-            "used": False, "attempts": 0, "created_at": now,
-        })
-        secret = user.get("two_factor_pending_secret") or generate_totp_secret()
-        await db.users.update_one({"_id": user["_id"]}, {"$set": {"two_factor_pending_secret": secret}})
-        issuer = "ZEROAXIS"
-        label = f"{issuer}:{email}"
-        otp_uri = f"otpauth://totp/{label}?secret={secret}&issuer={issuer}&algorithm=SHA1&digits=6&period=30"
-        qr = qrcode.make(otp_uri, image_factory=SvgPathImage, box_size=8, border=4)
-        qr_buffer = BytesIO()
-        qr.save(qr_buffer)
-        qr_code_svg_base64 = base64.b64encode(qr_buffer.getvalue()).decode("ascii")
-        await audit_log("admin_2fa_setup_started", str(user["_id"]), email, "user", str(user["_id"]))
-        return {"two_factor_setup_required": True, "challenge": challenge, "secret": secret, "otpauth_uri": otp_uri, "qr_code_svg_base64": qr_code_svg_base64}
-
-    challenge = secrets.token_urlsafe(32)
-    await db.admin_login_challenges.insert_one({
-        "token_hash": _challenge_hash(challenge), "user_id": str(user["_id"]),
-        "purpose": "login", "expires_at": now + timedelta(minutes=5),
-        "used": False, "attempts": 0, "created_at": now,
-    })
-    return {"two_factor_required": True, "challenge": challenge}
-
-
-@router.post("/recovery/request")
-async def request_admin_2fa_recovery(data: AdminRecoveryRequestIn, request: Request):
-    if not admin_network_allowed(request):
-        raise HTTPException(status_code=403, detail="Admin login is not allowed from this network")
-    db = get_db()
-    email = data.email.lower().strip()
-    user = await db.users.find_one({"email": email, "role": "admin"})
-    if not user or user.get("disabled") or not verify_password(data.password, user.get("password_hash", "")):
-        raise HTTPException(status_code=401, detail="Invalid admin credentials")
-    if not user.get("two_factor_secret"):
-        raise HTTPException(status_code=400, detail="Authenticator setup is not active for this account")
-    now = datetime.now(timezone.utc)
-    recent = await db.admin_2fa_recovery_otps.count_documents({
-        "user_id": str(user["_id"]), "created_at": {"$gt": now - timedelta(minutes=15)}
+    recent = await db.admin_login_challenges.count_documents({
+        "user_id": str(user["_id"]),
+        "purpose": "email_otp_login",
+        "created_at": {"$gt": now - timedelta(minutes=15)},
     })
     if recent >= 3:
-        raise HTTPException(status_code=429, detail="Too many recovery requests. Try again in 15 minutes.")
-    otp = f"{secrets.randbelow(1000000):06d}"
-    recovery_token = secrets.token_urlsafe(32)
-    await db.admin_2fa_recovery_otps.update_many(
-        {"user_id": str(user["_id"]), "used": False}, {"$set": {"used": True}}
-    )
-    await db.admin_2fa_recovery_otps.insert_one({
-        "user_id": str(user["_id"]),
-        "token_hash": _challenge_hash(recovery_token),
-        "otp_hash": hashlib.sha256(otp.encode("utf-8")).hexdigest(),
-        "created_at": now,
-        "expires_at": now + timedelta(minutes=10),
-        "used": False,
-        "attempts": 0,
-    })
-    admin_2fa_recovery_otp(to_email=email, name=user.get("name", ""), otp=otp)
-    await audit_log("admin_2fa_recovery_requested", str(user["_id"]), email, "user", str(user["_id"]))
-    return {"message": "If the admin credentials are valid, a recovery code has been sent to the registered email address.", "recovery_token": recovery_token}
+        raise HTTPException(status_code=429, detail="Too many email code requests. Try again in 15 minutes.")
 
-
-@router.post("/recovery/verify")
-async def verify_admin_2fa_recovery(data: AdminRecoveryVerifyIn, response: Response, request: Request):
-    if not admin_network_allowed(request):
-        raise HTTPException(status_code=403, detail="Admin login is not allowed from this network")
-    db = get_db()
-    now = datetime.now(timezone.utc)
-    rec = await db.admin_2fa_recovery_otps.find_one({
-        "token_hash": _challenge_hash(data.recovery_token),
-        "used": False,
-        "expires_at": {"$gt": now},
-    })
-    if not rec:
-        raise HTTPException(status_code=400, detail="Recovery session is invalid or expired. Request a new code.")
-    if rec.get("attempts", 0) >= 5:
-        await db.admin_2fa_recovery_otps.update_one({"_id": rec["_id"]}, {"$set": {"used": True}})
-        raise HTTPException(status_code=429, detail="Too many invalid recovery codes. Request a new code.")
-    supplied = hashlib.sha256(data.code.encode("utf-8")).hexdigest() if data.code.isdigit() and len(data.code) == 6 else ""
-    if not secrets.compare_digest(supplied, rec.get("otp_hash", "")):
-        await db.admin_2fa_recovery_otps.update_one({"_id": rec["_id"]}, {"$inc": {"attempts": 1}})
-        raise HTTPException(status_code=400, detail="Invalid or expired recovery code")
-    user = await db.users.find_one({
-        "_id": ObjectId(rec["user_id"]), "role": "admin", "disabled": {"$ne": True}
-    })
-    if not user or not user.get("two_factor_secret"):
-        await db.admin_2fa_recovery_otps.update_one({"_id": rec["_id"]}, {"$set": {"used": True}})
-        raise HTTPException(status_code=400, detail="Admin recovery is no longer available")
-    # Only after email OTP verification, invalidate the old authenticator secret
-    # and begin a fresh setup. No admin session is issued by this recovery flow.
-    new_secret = generate_totp_secret()
-    await db.users.update_one({"_id": user["_id"]}, {
-        "$set": {"two_factor_pending_secret": new_secret},
-        "$unset": {"two_factor_secret": "", "two_factor_enabled": ""},
-    })
+    # Invalidate earlier pending codes so only the newest challenge can be used.
     await db.admin_login_challenges.update_many(
-        {"user_id": str(user["_id"]), "used": False}, {"$set": {"used": True}}
+        {"user_id": str(user["_id"]), "purpose": "email_otp_login", "used": False},
+        {"$set": {"used": True}},
     )
     challenge = secrets.token_urlsafe(32)
+    otp = f"{secrets.randbelow(1_000_000):06d}"
     await db.admin_login_challenges.insert_one({
-        "token_hash": _challenge_hash(challenge),
+        "token_hash": _digest(challenge),
+        "otp_hash": _digest(otp),
         "user_id": str(user["_id"]),
-        "purpose": "setup",
-        "expires_at": now + timedelta(minutes=10),
+        "purpose": "email_otp_login",
+        "expires_at": now + timedelta(minutes=5),
+        "created_at": now,
         "used": False,
         "attempts": 0,
-        "created_at": now,
     })
-    await db.admin_2fa_recovery_otps.update_one({"_id": rec["_id"]}, {"$set": {"used": True, "verified_at": now}})
-    issuer = "ZEROAXIS"
-    label = f"{issuer}:{user['email']}"
-    otp_uri = f"otpauth://totp/{label}?secret={new_secret}&issuer={issuer}&algorithm=SHA1&digits=6&period=30"
-    qr = qrcode.make(otp_uri, image_factory=SvgPathImage, box_size=8, border=4)
-    qr_buffer = BytesIO()
-    qr.save(qr_buffer)
-    qr_code_svg_base64 = base64.b64encode(qr_buffer.getvalue()).decode("ascii")
-    await audit_log("admin_2fa_recovery_verified", str(user["_id"]), user["email"], "user", str(user["_id"]))
-    return {
-        "two_factor_setup_required": True,
-        "challenge": challenge,
-        "secret": new_secret,
-        "otpauth_uri": otp_uri,
-        "qr_code_svg_base64": qr_code_svg_base64,
-        "message": "Old authenticator disabled. Scan the new QR code and verify a fresh code to finish setup.",
-    }
 
-
-@router.post("/setup")
-async def admin_setup_2fa(data: AdminSetupIn, response: Response, request: Request):
-    if not admin_network_allowed(request):
-        raise HTTPException(status_code=403, detail="Admin login is not allowed from this network")
-    db = get_db()
-    rec = await db.admin_login_challenges.find_one({
-        "token_hash": _challenge_hash(data.challenge), "purpose": "setup",
-        "used": False, "expires_at": {"$gt": datetime.now(timezone.utc)},
-    })
-    if not rec:
-        raise HTTPException(status_code=400, detail="Setup session is invalid or expired")
-    user = await db.users.find_one({"_id": ObjectId(rec["user_id"]), "role": "admin", "disabled": {"$ne": True}})
-    if not user:
-        raise HTTPException(status_code=400, detail="Admin account not found or disabled")
-    secret = user.get("two_factor_pending_secret", "")
-    if not verify_totp(secret, data.code):
-        await _record_challenge_failure(db, rec)
-        raise HTTPException(status_code=400, detail="Invalid authenticator code")
-    await db.users.update_one({"_id": user["_id"]}, {"$set": {
-        "two_factor_secret": secret,
-        "two_factor_enabled": True,
-    }, "$unset": {"two_factor_pending_secret": ""}})
-    await db.admin_login_challenges.update_one({"_id": rec["_id"]}, {"$set": {"used": True}})
-    return await _issue_admin_session(response, user)
+    sent = await send_admin_login_otp(
+        to_email=email, name=user.get("name", ""), otp=otp
+    )
+    if not sent:
+        await db.admin_login_challenges.update_one(
+            {"token_hash": _digest(challenge), "used": False},
+            {"$set": {"used": True}},
+        )
+        raise HTTPException(status_code=503, detail="Email delivery is temporarily unavailable. Please try again.")
+    await audit_log("admin_email_otp_requested", str(user["_id"]), email, "user", str(user["_id"]))
+    return {"two_factor_required": True, "challenge": challenge,
+            "message": "A six-digit sign-in code has been sent to your registered admin email."}
 
 
 @router.post("/verify")
-async def admin_verify_2fa(data: AdminOtpIn, response: Response, request: Request):
+async def admin_verify_email_otp(data: AdminOtpIn, response: Response, request: Request):
     if not admin_network_allowed(request):
         raise HTTPException(status_code=403, detail="Admin login is not allowed from this network")
+    if not data.code.isdigit() or len(data.code) != 6:
+        raise HTTPException(status_code=400, detail="Enter the six-digit email code.")
+
     db = get_db()
     rec = await db.admin_login_challenges.find_one({
-        "token_hash": _challenge_hash(data.challenge), "purpose": "login",
-        "used": False, "expires_at": {"$gt": datetime.now(timezone.utc)},
+        "token_hash": _digest(data.challenge),
+        "purpose": "email_otp_login",
+        "used": False,
+        "expires_at": {"$gt": datetime.now(timezone.utc)},
     })
     if not rec:
-        raise HTTPException(status_code=400, detail="Login session is invalid or expired")
-    user = await db.users.find_one({"_id": ObjectId(rec["user_id"]), "role": "admin"})
-    if not user or user.get("disabled") or not verify_totp(user.get("two_factor_secret", ""), data.code):
-        await _record_challenge_failure(db, rec)
-        raise HTTPException(status_code=401, detail="Invalid authenticator code")
-    await db.admin_login_challenges.update_one({"_id": rec["_id"]}, {"$set": {"used": True}})
+        raise HTTPException(status_code=400, detail="Sign-in session is invalid or expired. Start login again.")
+    if rec.get("attempts", 0) >= 5:
+        await db.admin_login_challenges.update_one(
+            {"_id": rec["_id"], "used": False}, {"$set": {"used": True}}
+        )
+        raise HTTPException(status_code=429, detail="Too many incorrect codes. Start login again.")
+
+    if not hmac.compare_digest(_digest(data.code), rec.get("otp_hash", "")):
+        result = await db.admin_login_challenges.update_one(
+            {"_id": rec["_id"], "used": False}, {"$inc": {"attempts": 1}}
+        )
+        if result.matched_count != 1:
+            raise HTTPException(status_code=400, detail="Sign-in session is invalid or expired.")
+        raise HTTPException(status_code=401, detail="Incorrect email verification code.")
+
+    # Consume the challenge atomically to prevent concurrent/replayed verification.
+    consumed = await db.admin_login_challenges.update_one(
+        {"_id": rec["_id"], "used": False, "expires_at": {"$gt": datetime.now(timezone.utc)}},
+        {"$set": {"used": True, "verified_at": datetime.now(timezone.utc)}},
+    )
+    if consumed.modified_count != 1:
+        raise HTTPException(status_code=400, detail="Sign-in session is invalid or expired. Start login again.")
+
+    user = await db.users.find_one({
+        "_id": ObjectId(rec["user_id"]), "role": "admin", "disabled": {"$ne": True}
+    })
+    if not user:
+        raise HTTPException(status_code=403, detail="Admin account is disabled or unavailable.")
+
+    # Retire legacy authenticator secrets after the first successful email-OTP login.
+    if any(k in user for k in ("two_factor_secret", "two_factor_pending_secret", "two_factor_enabled")):
+        await db.users.update_one({"_id": user["_id"]}, {
+            "$unset": {"two_factor_secret": "", "two_factor_pending_secret": "", "two_factor_enabled": ""}
+        })
     return await _issue_admin_session(response, user)
