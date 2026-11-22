@@ -127,14 +127,26 @@ async def activate_account(data: ActivateAccountIn):
     rec = await db.account_activation_tokens.find_one({"token_hash": token_hash, "used": False, "expires_at": {"$gt": datetime.now(timezone.utc)}})
     if not rec:
         raise HTTPException(status_code=400, detail="Invalid or expired account activation link")
+    now = datetime.now(timezone.utc)
+    claimed = await db.account_activation_tokens.update_one(
+        {"_id": rec["_id"], "used": False, "expires_at": {"$gt": now}},
+        {"$set": {"used": True, "used_at": now}},
+    )
+    if claimed.modified_count != 1:
+        raise HTTPException(status_code=400, detail="Invalid or expired account activation link")
     try:
         user_id = ObjectId(rec["user_id"])
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid account activation link")
-    result = await db.users.update_one({"_id": user_id, "role": "customer", "account_status": {"$ne": "deleted"}}, {"$set": {"password_hash": await asyncio.to_thread(hash_password, data.new_password), "account_status": "active", "activated_at": datetime.now(timezone.utc)}})
+    result = await db.users.update_one(
+        {"_id": user_id, "role": "customer", "account_status": {"$ne": "deleted"}},
+        {"$set": {
+            "password_hash": await asyncio.to_thread(hash_password, data.new_password),
+            "account_status": "active", "activated_at": now,
+        }},
+    )
     if result.matched_count != 1:
         raise HTTPException(status_code=400, detail="Account activation link is invalid")
-    await db.account_activation_tokens.update_one({"_id": rec["_id"]}, {"$set": {"used": True, "used_at": datetime.now(timezone.utc)}})
     return {"success": True}
 
 
