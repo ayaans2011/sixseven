@@ -169,6 +169,10 @@ async def get_order(oid: str, user=Depends(get_current_user)):
             "created_at": p.get("created_at"),
             "verified_by": p.get("verified_by"),
             "verified_at": p.get("verified_at"),
+            "provider": p.get("provider"), "proof_file_id": p.get("proof_file_id"),
+            "proof_name": p.get("proof_name"), "rejection_reason": p.get("rejection_reason"),
+            "submitted_by": p.get("submitted_by"), "reference": p.get("reference"),
+            "review_note": p.get("review_note"),
         } for p in payments],
     }
 
@@ -372,6 +376,101 @@ async def famgateway_webhook(request: Request):
         raise HTTPException(status_code=409, detail="Verified payment amount mismatch")
     await _mark_famgateway_paid(db, payment, order, confirmed)
     return {"status": "received"}
+
+
+@router.post("/{oid}/payment/manual-submit")
+async def submit_manual_payment(oid: str, data: dict, user=Depends(get_current_user)):
+    if user.get("role") != "customer":
+        raise HTTPException(status_code=403, detail="Customer account required")
+    method = str(data.get("method") or "").upper().strip()
+    if method not in {"CHEQUE", "CASH", "BANK_TRANSFER"}:
+        raise HTTPException(status_code=400, detail="Choose cheque, cash or bank transfer")
+    reference = str(data.get("reference") or "").strip()[:120]
+    proof_id = str(data.get("proof_file_id") or "").strip()
+    if not proof_id:
+        raise HTTPException(status_code=400, detail="Upload payment proof")
+    db = get_db()
+    try:
+        order = await db.orders.find_one({"_id": ObjectId(oid), "customer_id": user["id"]})
+        proof = await db.files.find_one({"_id": ObjectId(proof_id), "parent_type": "order",
+            "parent_id": oid, "owner_id": user["id"], "is_deleted": {"$ne": True}})
+    except Exception:
+        raise HTTPException(status_code=404, detail="Order or proof not found")
+    if not order or not proof:
+        raise HTTPException(status_code=404, detail="Order or proof not found")
+    if proof.get("mime") not in {"application/pdf", "image/jpeg", "image/png", "image/webp"}:
+        raise HTTPException(status_code=400, detail="Proof must be a PDF or image")
+    if order.get("payment_status") == "PAYMENT_VERIFIED":
+        raise HTTPException(status_code=409, detail="This order is already paid")
+    pending = await db.payments.find_one({"order_id": oid, "provider": "manual", "status": "PENDING_VERIFICATION"})
+    if pending:
+        raise HTTPException(status_code=409, detail="A payment submission is already awaiting review")
+    if reference and await db.payments.find_one({"provider": "manual", "reference": reference,
+            "status": {"$in": ["PENDING_VERIFICATION", "PAYMENT_VERIFIED"]}}):
+        raise HTTPException(status_code=409, detail="This payment reference has already been submitted")
+    now = datetime.now(timezone.utc).isoformat()
+    await db.payments.insert_one({"order_id": oid, "customer_id": user["id"], "provider": "manual",
+        "method": method, "reference": reference, "amount": float(order.get("amount", 0)),
+        "status": "PENDING_VERIFICATION", "proof_file_id": proof_id,
+        "proof_name": proof.get("original_name"), "submitted_by": user["email"], "created_at": now})
+    await db.orders.update_one({"_id": order["_id"], "payment_status": {"$ne": "PAYMENT_VERIFIED"}},
+        {"$set": {"payment_status": "PENDING_VERIFICATION", "updated_at": now}})
+    await _add_status_history(db, oid, order.get("order_status", "CREATED"), order.get("order_status", "CREATED"),
+        user["id"], user["email"], method.replace("_", " ").title() + " proof submitted for review")
+    admins = await db.users.find({"role": "admin", "disabled": {"$ne": True}}, {"_id": 1}).to_list(1000)
+    for admin_user in admins:
+        await db.notifications.insert_one({"user_id": str(admin_user["_id"]), "title": "Payment proof submitted",
+            "body": order.get("order_number", "") + " · " + method.replace("_", " ").title() + " payment requires review.",
+            "read": False, "created_at": now})
+    await audit_log("manual_payment_submitted", user["id"], user["email"], "order", oid,
+        {"method": method, "amount": float(order.get("amount", 0)), "payment_reference": reference})
+    return {"success": True, "payment_status": "PENDING_VERIFICATION"}
+
+
+@router.post("/{oid}/payment/manual-review")
+async def review_manual_payment(oid: str, data: dict, admin=Depends(require_admin)):
+    payment_id = str(data.get("payment_id") or "").strip()
+    decision = str(data.get("decision") or "").upper().strip()
+    note = str(data.get("note") or "").strip()[:500]
+    if decision not in {"APPROVE", "REJECT"}:
+        raise HTTPException(status_code=400, detail="Invalid review decision")
+    if decision == "REJECT" and not note:
+        raise HTTPException(status_code=400, detail="A rejection reason is required")
+    db = get_db()
+    try:
+        order = await db.orders.find_one({"_id": ObjectId(oid)})
+        payment = await db.payments.find_one({"_id": ObjectId(payment_id), "order_id": oid,
+            "provider": "manual", "status": "PENDING_VERIFICATION"})
+    except Exception:
+        raise HTTPException(status_code=404, detail="Order or payment not found")
+    if not order or not payment:
+        raise HTTPException(status_code=404, detail="Pending manual payment not found")
+    now = datetime.now(timezone.utc).isoformat()
+    if decision == "APPROVE":
+        if order.get("payment_status") == "PAYMENT_VERIFIED":
+            raise HTTPException(status_code=409, detail="Order is already paid")
+        update = {"status": "PAYMENT_VERIFIED", "verified_by": admin["email"], "verified_at": now, "review_note": note}
+    else:
+        update = {"status": "PAYMENT_REJECTED", "verified_by": admin["email"], "verified_at": now, "rejection_reason": note}
+    result = await db.payments.update_one({"_id": payment["_id"], "status": "PENDING_VERIFICATION"}, {"$set": update})
+    if not result.modified_count:
+        raise HTTPException(status_code=409, detail="Payment was already reviewed")
+    new_status = "PAYMENT_VERIFIED" if decision == "APPROVE" else "PAYMENT_REJECTED"
+    await db.orders.update_one({"_id": order["_id"], "payment_status": {"$ne": "PAYMENT_VERIFIED"}},
+        {"$set": {"payment_status": new_status, "updated_at": now}})
+    await _add_status_history(db, oid, order.get("order_status", "CREATED"), order.get("order_status", "CREATED"),
+        admin["id"], admin["email"], "Manual payment " + ("verified" if decision == "APPROVE" else "rejected") + ": " + note)
+    title = "Payment verified" if decision == "APPROVE" else "Payment proof rejected"
+    body = "Payment for order " + order.get("order_number", "") + (" has been verified." if decision == "APPROVE" else " was rejected. Reason: " + note)
+    if order.get("customer_id"):
+        await db.notifications.insert_one({"user_id": order["customer_id"], "title": title, "body": body,
+            "read": False, "created_at": now})
+    if decision == "APPROVE" and order.get("customer_email"):
+        email_svc.payment_verified(to_email=order["customer_email"], name=order.get("customer_name", ""),
+            order_number=order.get("order_number", ""), amount=float(order.get("amount", 0)))
+    await audit_log("manual_payment_" + ("verified" if decision == "APPROVE" else "rejected"),
+        admin["id"], admin["email"], "order", oid, {"payment_id": payment_id, "method": payment.get("method"), "note": note})
+    return {"success": True, "payment_status": new_status}
 
 # Admin: update order status
 @router.post("/{oid}/status")
