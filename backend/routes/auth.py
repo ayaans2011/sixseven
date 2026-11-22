@@ -4,17 +4,23 @@ from fastapi import APIRouter, HTTPException, Request, Response, Depends
 from bson import ObjectId
 import secrets
 import hashlib
+import hmac
 
 from database import get_db
 from security import (
     hash_password, verify_password, create_access_token, create_refresh_token,
     set_auth_cookies, clear_auth_cookies, get_current_user,
-    check_lockout, record_failed_login, clear_login_attempts, audit_log,
+    check_lockout, record_failed_login, clear_login_attempts, audit_log, get_jwt_secret,
 )
 from models import RegisterIn, LoginIn, ForgotPasswordIn, ResetPasswordIn, RegisterOtpIn, ActivateAccountIn
-from services.email import password_reset, registration_otp
+from services.email import send_password_reset, send_registration_otp
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+
+def _otp_digest(value: str) -> str:
+    return hmac.new(get_jwt_secret().encode("utf-8"), value.encode("utf-8"), hashlib.sha256).hexdigest()
+
 
 
 def _serialize_user(u: dict) -> dict:
@@ -31,44 +37,81 @@ def _serialize_user(u: dict) -> dict:
 
 
 @router.post("/register")
-async def register(data: RegisterIn):
+async def register(data: RegisterIn, request: Request):
     db = get_db()
     email = data.email.lower().strip()
-    if await db.users.find_one({"email": email}):
+    if await db.users.find_one({"email": email}, {"_id": 1}):
         raise HTTPException(status_code=400, detail="Email already registered")
-    otp = f"{secrets.randbelow(1000000):06d}"
-    otp_hash = hashlib.sha256(otp.encode("utf-8")).hexdigest()
     now = datetime.now(timezone.utc)
-    await db.registration_email_otps.update_many({"email": email, "used": False}, {"$set": {"used": True}})
-    await db.registration_email_otps.insert_one({
-        "email": email, "name": data.name.strip(), "phone": data.phone,
-        "password_hash": await asyncio.to_thread(hash_password, data.password), "otp_hash": otp_hash,
-        "used": False, "attempts": 0, "expires_at": now + timedelta(minutes=10), "created_at": now,
+    recent = await db.registration_email_otps.count_documents({
+        "email": email, "created_at": {"$gt": now - timedelta(minutes=15)}
     })
-    registration_otp(to_email=email, name=data.name.strip(), otp=otp)
+    if recent >= 3:
+        raise HTTPException(status_code=429, detail="Too many verification requests. Try again in 15 minutes.")
+    otp = f"{secrets.randbelow(1_000_000):06d}"
+    await db.registration_email_otps.update_many(
+        {"email": email, "used": False}, {"$set": {"used": True}}
+    )
+    result = await db.registration_email_otps.insert_one({
+        "email": email, "name": data.name.strip(), "phone": data.phone,
+        "password_hash": await asyncio.to_thread(hash_password, data.password),
+        "otp_hash": _otp_digest(otp), "used": False, "attempts": 0,
+        "expires_at": now + timedelta(minutes=10), "created_at": now,
+    })
+    delivered = await send_registration_otp(to_email=email, name=data.name.strip(), otp=otp)
+    if not delivered:
+        await db.registration_email_otps.update_one(
+            {"_id": result.inserted_id, "used": False}, {"$set": {"used": True}}
+        )
+        raise HTTPException(status_code=503, detail="We couldn't send the verification email. Please try again later.")
     return {"message": "A verification code has been sent to your email."}
-
 
 @router.post("/register/verify-otp")
 async def verify_registration_otp(data: RegisterOtpIn, response: Response):
     db = get_db()
     email = data.email.lower().strip()
-    rec = await db.registration_email_otps.find_one({"email": email, "used": False, "expires_at": {"$gt": datetime.now(timezone.utc)}}, sort=[("created_at", -1)])
+    now = datetime.now(timezone.utc)
+    rec = await db.registration_email_otps.find_one(
+        {"email": email, "used": False, "expires_at": {"$gt": now}},
+        sort=[("created_at", -1)],
+    )
     if not rec:
         raise HTTPException(status_code=400, detail="Invalid or expired verification code")
     if rec.get("attempts", 0) >= 5:
-        await db.registration_email_otps.update_one({"_id": rec["_id"]}, {"$set": {"used": True}})
-        raise HTTPException(status_code=400, detail="Too many verification attempts. Please register again.")
-    supplied = hashlib.sha256(data.otp.encode("utf-8")).hexdigest()
-    if not secrets.compare_digest(supplied, rec.get("otp_hash", "")):
-        await db.registration_email_otps.update_one({"_id": rec["_id"]}, {"$inc": {"attempts": 1}})
-        raise HTTPException(status_code=400, detail="Invalid or expired verification code")
-    if await db.users.find_one({"email": email}):
-        await db.registration_email_otps.update_one({"_id": rec["_id"]}, {"$set": {"used": True}})
+        await db.registration_email_otps.update_one(
+            {"_id": rec["_id"], "used": False}, {"$set": {"used": True}}
+        )
+        raise HTTPException(status_code=429, detail="Too many verification attempts. Please register again.")
+    if await db.users.find_one({"email": email}, {"_id": 1}):
+        await db.registration_email_otps.update_one(
+            {"_id": rec["_id"], "used": False}, {"$set": {"used": True}}
+        )
         raise HTTPException(status_code=400, detail="Email already registered")
-    doc = {"email": email, "name": rec["name"], "phone": rec.get("phone"), "password_hash": rec["password_hash"], "role": "customer", "created_at": datetime.now(timezone.utc).isoformat()}
-    res = await db.users.insert_one(doc)
-    await db.registration_email_otps.update_one({"_id": rec["_id"]}, {"$set": {"used": True}})
+
+    consumed = await db.registration_email_otps.update_one(
+        {"_id": rec["_id"], "used": False, "attempts": {"$lt": 5},
+         "expires_at": {"$gt": now}, "otp_hash": _otp_digest(data.otp)},
+        {"$set": {"used": True, "verified_at": now}},
+    )
+    if consumed.modified_count != 1:
+        await db.registration_email_otps.update_one(
+            {"_id": rec["_id"], "used": False, "attempts": {"$lt": 5}},
+            {"$inc": {"attempts": 1}},
+        )
+        raise HTTPException(status_code=400, detail="Invalid or expired verification code")
+
+    doc = {
+        "email": email, "name": rec["name"], "phone": rec.get("phone"),
+        "password_hash": rec["password_hash"], "role": "customer",
+        "created_at": now.isoformat(),
+    }
+    try:
+        res = await db.users.insert_one(doc)
+    except Exception as exc:
+        from pymongo.errors import DuplicateKeyError
+        if isinstance(exc, DuplicateKeyError):
+            raise HTTPException(status_code=400, detail="Email already registered")
+        raise
     uid = str(res.inserted_id)
     access = create_access_token(uid, email, "customer")
     refresh = create_refresh_token(uid)
@@ -76,7 +119,6 @@ async def verify_registration_otp(data: RegisterOtpIn, response: Response):
     await audit_log("user_registered", uid, email, "user", uid)
     doc["_id"] = res.inserted_id
     return {**_serialize_user(doc), "access_token": access}
-
 
 @router.post("/activate-account")
 async def activate_account(data: ActivateAccountIn):
@@ -165,9 +207,13 @@ async def forgot_password(data: ForgotPasswordIn):
         expires_at = datetime.now(timezone.utc) + timedelta(minutes=30)
         await db.password_reset_tokens.insert_one({"user_id": str(user["_id"]), "token_hash": token_hash, "used": False, "expires_at": expires_at, "created_at": datetime.now(timezone.utc)})
         otp = f"{secrets.randbelow(1000000):06d}"
-        otp_hash = hashlib.sha256(otp.encode("utf-8")).hexdigest()
+        otp_hash = _otp_digest(otp)
         await db.password_reset_tokens.update_one({"token_hash": token_hash}, {"$set": {"otp_hash": otp_hash, "otp_used": False, "otp_attempts": 0}})
-        password_reset(to_email=email, name=user.get("name", ""), reset_token=token, otp=otp)
+        delivered = await send_password_reset(to_email=email, name=user.get("name", ""), reset_token=token, otp=otp)
+        if not delivered:
+            await db.password_reset_tokens.update_one(
+                {"token_hash": token_hash, "used": False}, {"$set": {"used": True}}
+            )
     return {"message": "If the email exists, a password reset link has been sent."}
 
 
@@ -175,20 +221,40 @@ async def forgot_password(data: ForgotPasswordIn):
 async def reset_password(data: ResetPasswordIn):
     db = get_db()
     token_hash = hashlib.sha256(data.token.encode("utf-8")).hexdigest()
-    rec = await db.password_reset_tokens.find_one({"token_hash": token_hash, "used": False, "expires_at": {"$gt": datetime.now(timezone.utc)}})
+    now = datetime.now(timezone.utc)
+    rec = await db.password_reset_tokens.find_one({
+        "token_hash": token_hash, "used": False, "expires_at": {"$gt": now}
+    })
     if not rec:
         raise HTTPException(status_code=400, detail="Invalid or expired reset link")
-    if rec.get("otp_used"):
+    if rec.get("otp_used") or rec.get("otp_attempts", 0) >= 5:
         raise HTTPException(status_code=400, detail="Invalid or expired verification code")
-    if rec.get("otp_attempts", 0) >= 5:
-        await db.password_reset_tokens.update_one({"_id": rec["_id"]}, {"$set": {"used": True}})
-        raise HTTPException(status_code=400, detail="Too many verification attempts. Please request a new reset code.")
-    supplied_otp = hashlib.sha256(data.otp.encode("utf-8")).hexdigest()
-    if not rec.get("otp_hash") or not secrets.compare_digest(supplied_otp, rec["otp_hash"]):
-        await db.password_reset_tokens.update_one({"_id": rec["_id"]}, {"$inc": {"otp_attempts": 1}})
+
+    consumed = await db.password_reset_tokens.update_one(
+        {"_id": rec["_id"], "used": False, "otp_used": False,
+         "otp_attempts": {"$lt": 5}, "expires_at": {"$gt": now},
+         "otp_hash": _otp_digest(data.otp)},
+        {"$set": {"used": True, "otp_used": True, "used_at": now}},
+    )
+    if consumed.modified_count != 1:
+        await db.password_reset_tokens.update_one(
+            {"_id": rec["_id"], "used": False, "otp_used": False,
+             "otp_attempts": {"$lt": 5}},
+            {"$inc": {"otp_attempts": 1}},
+        )
         raise HTTPException(status_code=400, detail="Invalid or expired verification code")
-    result = await db.users.update_one({"_id": ObjectId(rec["user_id"]), "role": "customer", "account_status": {"$ne": "deleted"}}, {"$set": {"password_hash": hash_password(data.new_password), "account_status": "active", "activated_at": datetime.now(timezone.utc)}})
+
+    try:
+        user_id = ObjectId(rec["user_id"])
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset link")
+    result = await db.users.update_one(
+        {"_id": user_id, "role": "customer", "account_status": {"$ne": "deleted"}},
+        {"$set": {
+            "password_hash": await asyncio.to_thread(hash_password, data.new_password),
+            "account_status": "active", "activated_at": now,
+        }},
+    )
     if result.matched_count != 1:
         raise HTTPException(status_code=400, detail="Invalid or expired reset link")
-    await db.password_reset_tokens.update_one({"_id": rec["_id"]}, {"$set": {"used": True, "otp_used": True}})
     return {"success": True}

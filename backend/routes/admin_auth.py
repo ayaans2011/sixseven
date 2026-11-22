@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, EmailStr
@@ -54,7 +55,7 @@ async def admin_login(data: AdminLoginIn, request: Request):
     identifier = f"admin:{ip}:{email}"
     await check_lockout(identifier)
     user = await db.users.find_one({"email": email, "role": "admin"})
-    if not user or user.get("disabled") or not verify_password(data.password, user.get("password_hash", "")):
+    if not user or user.get("disabled") or not await asyncio.to_thread(verify_password, data.password, user.get("password_hash", "")):
         await record_failed_login(identifier)
         raise HTTPException(status_code=401, detail="Invalid admin credentials")
     await clear_login_attempts(identifier)

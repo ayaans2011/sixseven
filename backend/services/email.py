@@ -430,3 +430,28 @@ async def send_admin_login_otp(*, to_email: str, name: str, otp: str) -> bool:
         f'<p>If you did not request this code, you can ignore this email and consider changing your administrator password.</p>'
     )
     return bool(await _send_email(to=to_email, subject=subject, html=_wrap(inner)))
+
+
+async def send_registration_otp(*, to_email: str, name: str, otp: str) -> bool:
+    subject = "Verify your ZEROAXIS email"
+    inner = (
+        f'<p>Hi {escape(name or "there")}</p>'
+        f'<p>Use the verification code below to complete your ZEROAXIS registration.</p>'
+        f'<p style="font-size:22px;letter-spacing:5px;font-weight:700"><b>{escape(otp)}</b></p>'
+        f'<p>This code is valid for <b>10 minutes</b> and can only be used once.</p>'
+        f'<p>If you did not request an account, ignore this email.</p>'
+    )
+    return bool(await _send_email(to=to_email, subject=subject, html=_wrap(inner)))
+
+
+async def send_password_reset(*, to_email: str, name: str, reset_token: str, otp: str) -> bool:
+    reset_url = _app_url(f"/?reset_token={reset_token}")
+    inner = (
+        f'<p>Hi {escape(name or "there")},</p>'
+        f'<p>We received a request to reset your ZEROAXIS account password.</p>'
+        f'<p>This link and verification code are valid for <b>30 minutes</b> and can only be used once.</p>'
+        f'<p style="font-size:22px;letter-spacing:5px;font-weight:700"><b>{escape(otp)}</b></p>'
+        f'{_button(reset_url, "Reset your password") if reset_url else ""}'
+        f'<p>If you did not request this, ignore this email.</p>'
+    )
+    return bool(await _send_email(to=to_email, subject="Reset your ZEROAXIS password", html=_wrap(inner)))
