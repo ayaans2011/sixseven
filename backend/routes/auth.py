@@ -70,22 +70,48 @@ async def register(data: RegisterIn, request: Request):
 async def verify_registration_otp(data: RegisterOtpIn, response: Response):
     db = get_db()
     email = data.email.lower().strip()
-    rec = await db.registration_email_otps.find_one({"email": email, "used": False, "expires_at": {"$gt": datetime.now(timezone.utc)}}, sort=[("created_at", -1)])
+    now = datetime.now(timezone.utc)
+    rec = await db.registration_email_otps.find_one(
+        {"email": email, "used": False, "expires_at": {"$gt": now}},
+        sort=[("created_at", -1)],
+    )
     if not rec:
         raise HTTPException(status_code=400, detail="Invalid or expired verification code")
     if rec.get("attempts", 0) >= 5:
-        await db.registration_email_otps.update_one({"_id": rec["_id"]}, {"$set": {"used": True}})
-        raise HTTPException(status_code=400, detail="Too many verification attempts. Please register again.")
-    supplied = hashlib.sha256(data.otp.encode("utf-8")).hexdigest()
-    if not secrets.compare_digest(supplied, rec.get("otp_hash", "")):
-        await db.registration_email_otps.update_one({"_id": rec["_id"]}, {"$inc": {"attempts": 1}})
-        raise HTTPException(status_code=400, detail="Invalid or expired verification code")
-    if await db.users.find_one({"email": email}):
-        await db.registration_email_otps.update_one({"_id": rec["_id"]}, {"$set": {"used": True}})
+        await db.registration_email_otps.update_one(
+            {"_id": rec["_id"], "used": False}, {"$set": {"used": True}}
+        )
+        raise HTTPException(status_code=429, detail="Too many verification attempts. Please register again.")
+    if await db.users.find_one({"email": email}, {"_id": 1}):
+        await db.registration_email_otps.update_one(
+            {"_id": rec["_id"], "used": False}, {"$set": {"used": True}}
+        )
         raise HTTPException(status_code=400, detail="Email already registered")
-    doc = {"email": email, "name": rec["name"], "phone": rec.get("phone"), "password_hash": rec["password_hash"], "role": "customer", "created_at": datetime.now(timezone.utc).isoformat()}
-    res = await db.users.insert_one(doc)
-    await db.registration_email_otps.update_one({"_id": rec["_id"]}, {"$set": {"used": True}})
+
+    consumed = await db.registration_email_otps.update_one(
+        {"_id": rec["_id"], "used": False, "attempts": {"$lt": 5},
+         "expires_at": {"$gt": now}, "otp_hash": _otp_digest(data.otp)},
+        {"$set": {"used": True, "verified_at": now}},
+    )
+    if consumed.modified_count != 1:
+        await db.registration_email_otps.update_one(
+            {"_id": rec["_id"], "used": False, "attempts": {"$lt": 5}},
+            {"$inc": {"attempts": 1}},
+        )
+        raise HTTPException(status_code=400, detail="Invalid or expired verification code")
+
+    doc = {
+        "email": email, "name": rec["name"], "phone": rec.get("phone"),
+        "password_hash": rec["password_hash"], "role": "customer",
+        "created_at": now.isoformat(),
+    }
+    try:
+        res = await db.users.insert_one(doc)
+    except Exception as exc:
+        from pymongo.errors import DuplicateKeyError
+        if isinstance(exc, DuplicateKeyError):
+            raise HTTPException(status_code=400, detail="Email already registered")
+        raise
     uid = str(res.inserted_id)
     access = create_access_token(uid, email, "customer")
     refresh = create_refresh_token(uid)
@@ -93,7 +119,6 @@ async def verify_registration_otp(data: RegisterOtpIn, response: Response):
     await audit_log("user_registered", uid, email, "user", uid)
     doc["_id"] = res.inserted_id
     return {**_serialize_user(doc), "access_token": access}
-
 
 @router.post("/activate-account")
 async def activate_account(data: ActivateAccountIn):
@@ -182,7 +207,7 @@ async def forgot_password(data: ForgotPasswordIn):
         expires_at = datetime.now(timezone.utc) + timedelta(minutes=30)
         await db.password_reset_tokens.insert_one({"user_id": str(user["_id"]), "token_hash": token_hash, "used": False, "expires_at": expires_at, "created_at": datetime.now(timezone.utc)})
         otp = f"{secrets.randbelow(1000000):06d}"
-        otp_hash = hashlib.sha256(otp.encode("utf-8")).hexdigest()
+        otp_hash = _otp_digest(otp)
         await db.password_reset_tokens.update_one({"token_hash": token_hash}, {"$set": {"otp_hash": otp_hash, "otp_used": False, "otp_attempts": 0}})
         password_reset(to_email=email, name=user.get("name", ""), reset_token=token, otp=otp)
     return {"message": "If the email exists, a password reset link has been sent."}
@@ -200,11 +225,11 @@ async def reset_password(data: ResetPasswordIn):
     if rec.get("otp_attempts", 0) >= 5:
         await db.password_reset_tokens.update_one({"_id": rec["_id"]}, {"$set": {"used": True}})
         raise HTTPException(status_code=400, detail="Too many verification attempts. Please request a new reset code.")
-    supplied_otp = hashlib.sha256(data.otp.encode("utf-8")).hexdigest()
+    supplied_otp = _otp_digest(data.otp)
     if not rec.get("otp_hash") or not secrets.compare_digest(supplied_otp, rec["otp_hash"]):
         await db.password_reset_tokens.update_one({"_id": rec["_id"]}, {"$inc": {"otp_attempts": 1}})
         raise HTTPException(status_code=400, detail="Invalid or expired verification code")
-    result = await db.users.update_one({"_id": ObjectId(rec["user_id"]), "role": "customer", "account_status": {"$ne": "deleted"}}, {"$set": {"password_hash": hash_password(data.new_password), "account_status": "active", "activated_at": datetime.now(timezone.utc)}})
+    result = await db.users.update_one({"_id": ObjectId(rec["user_id"]), "role": "customer", "account_status": {"$ne": "deleted"}}, {"$set": {"password_hash": await asyncio.to_thread(hash_password, data.new_password), "account_status": "active", "activated_at": datetime.now(timezone.utc)}})
     if result.matched_count != 1:
         raise HTTPException(status_code=400, detail="Invalid or expired reset link")
     await db.password_reset_tokens.update_one({"_id": rec["_id"]}, {"$set": {"used": True, "otp_used": True}})
