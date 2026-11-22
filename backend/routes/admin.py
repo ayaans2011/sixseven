@@ -1,13 +1,14 @@
 from datetime import datetime, timezone, timedelta
 import hashlib
+import hmac
 import secrets
 from fastapi import APIRouter, HTTPException, Depends
 from bson import ObjectId
 
 from pydantic import BaseModel
 from database import get_db
-from security import require_admin, get_current_user, audit_log, verify_password, verify_totp, hash_password
-from models import ContentIn, AdminCustomerCreateIn, AdminCustomerDeleteIn
+from security import require_admin, get_current_user, audit_log, verify_password, hash_password, get_jwt_secret
+from models import ContentIn, AdminCustomerCreateIn, AdminCustomerDeleteOtpRequestIn, AdminCustomerDeleteIn
 from services import email as email_svc
 
 router = APIRouter(prefix="/api", tags=["admin_content"])
@@ -214,9 +215,13 @@ async def get_customer_record(uid: str, admin=Depends(require_admin)):
     }
 
 
-@router.post("/admin/customers/{uid}/delete")
-async def delete_customer_account(uid: str, data: AdminCustomerDeleteIn, admin=Depends(require_admin)):
-    """Re-authenticate admin with password + current TOTP; deactivate/anonymise profile, retain financial records."""
+def _sensitive_otp_digest(value: str) -> str:
+    return hmac.new(get_jwt_secret().encode("utf-8"), value.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+@router.post("/admin/customers/{uid}/delete/request-otp")
+async def request_customer_delete_otp(uid: str, data: AdminCustomerDeleteOtpRequestIn, admin=Depends(require_admin)):
+    """Send an email OTP after administrator password re-authentication."""
     db = get_db()
     try:
         admin_doc = await db.users.find_one({"_id": ObjectId(admin["id"]), "role": "admin", "disabled": {"$ne": True}})
@@ -225,12 +230,90 @@ async def delete_customer_account(uid: str, data: AdminCustomerDeleteIn, admin=D
         raise HTTPException(status_code=404, detail="Customer not found")
     if not admin_doc or not verify_password(data.admin_password, admin_doc.get("password_hash", "")):
         raise HTTPException(status_code=401, detail="Administrator re-authentication failed.")
-    if not verify_totp(admin_doc.get("two_factor_secret", ""), data.totp_code):
-        raise HTTPException(status_code=401, detail="Authenticator verification failed.")
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
+
+    now = datetime.now(timezone.utc)
+    recent = await db.admin_login_challenges.count_documents({
+        "user_id": admin["id"], "purpose": "customer_delete_email_otp",
+        "created_at": {"$gt": now - timedelta(minutes=15)},
+    })
+    if recent >= 3:
+        raise HTTPException(status_code=429, detail="Too many code requests. Try again in 15 minutes.")
+    await db.admin_login_challenges.update_many(
+        {"user_id": admin["id"], "purpose": "customer_delete_email_otp", "used": False},
+        {"$set": {"used": True}},
+    )
+    challenge = secrets.token_urlsafe(32)
+    otp = f"{secrets.randbelow(1_000_000):06d}"
+    await db.admin_login_challenges.insert_one({
+        "token_hash": _sensitive_otp_digest(challenge),
+        "otp_hash": _sensitive_otp_digest(otp),
+        "user_id": admin["id"], "target_id": uid,
+        "purpose": "customer_delete_email_otp",
+        "expires_at": now + timedelta(minutes=5), "created_at": now,
+        "used": False, "attempts": 0,
+    })
+    sent = await email_svc.send_admin_sensitive_action_otp(
+        to_email=admin_doc["email"], name=admin_doc.get("name", ""),
+        otp=otp, action="customer account deletion",
+    )
+    if not sent:
+        await db.admin_login_challenges.update_one(
+            {"token_hash": _sensitive_otp_digest(challenge), "used": False},
+            {"$set": {"used": True}},
+        )
+        raise HTTPException(status_code=503, detail="Email delivery is temporarily unavailable. Please try again.")
+    await audit_log("customer_delete_email_otp_requested", admin["id"], admin["email"], "user", uid)
+    return {"challenge": challenge, "message": "A six-digit confirmation code was sent to your administrator email."}
+
+
+@router.post("/admin/customers/{uid}/delete")
+async def delete_customer_account(uid: str, data: AdminCustomerDeleteIn, admin=Depends(require_admin)):
+    """Re-authenticate admin with password and one-time email OTP; retain financial records."""
+    db = get_db()
+    try:
+        admin_doc = await db.users.find_one({"_id": ObjectId(admin["id"]), "role": "admin", "disabled": {"$ne": True}})
+        customer = await db.users.find_one({"_id": ObjectId(uid), "role": "customer"})
+    except Exception:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    if not admin_doc or not verify_password(data.admin_password, admin_doc.get("password_hash", "")):
+        raise HTTPException(status_code=401, detail="Administrator re-authentication failed.")
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    if not data.email_otp.isdigit() or len(data.email_otp) != 6:
+        raise HTTPException(status_code=400, detail="Enter the six-digit email code.")
+    challenge = await db.admin_login_challenges.find_one({
+        "token_hash": _sensitive_otp_digest(data.otp_challenge),
+        "user_id": admin["id"], "target_id": uid,
+        "purpose": "customer_delete_email_otp", "used": False,
+        "expires_at": {"$gt": datetime.now(timezone.utc)},
+    })
+    if not challenge:
+        raise HTTPException(status_code=400, detail="Confirmation session is invalid or expired. Request a new code.")
+    if challenge.get("attempts", 0) >= 5:
+        await db.admin_login_challenges.update_one({"_id": challenge["_id"], "used": False}, {"$set": {"used": True}})
+        raise HTTPException(status_code=429, detail="Too many incorrect codes. Request a new code.")
+    if not hmac.compare_digest(_sensitive_otp_digest(data.email_otp), challenge.get("otp_hash", "")):
+        attempts = int(challenge.get("attempts", 0))
+        update = {"$inc": {"attempts": 1}}
+        if attempts >= 4:
+            update["$set"] = {"used": True}
+        changed = await db.admin_login_challenges.update_one(
+            {"_id": challenge["_id"], "used": False, "attempts": attempts,
+             "expires_at": {"$gt": datetime.now(timezone.utc)}}, update)
+        if changed.modified_count != 1:
+            raise HTTPException(status_code=400, detail="Confirmation session is invalid or expired.")
+        if attempts >= 4:
+            raise HTTPException(status_code=429, detail="Too many incorrect codes. Request a new code.")
+        raise HTTPException(status_code=401, detail="Incorrect email confirmation code.")
     if str(data.confirm_customer_email).lower().strip() != customer.get("email", "").lower().strip():
         raise HTTPException(status_code=400, detail="Customer email confirmation does not match.")
+    consumed = await db.admin_login_challenges.update_one(
+        {"_id": challenge["_id"], "used": False, "expires_at": {"$gt": datetime.now(timezone.utc)}},
+        {"$set": {"used": True, "verified_at": datetime.now(timezone.utc)}})
+    if consumed.modified_count != 1:
+        raise HTTPException(status_code=400, detail="Confirmation session is invalid or expired.")
 
     now = datetime.now(timezone.utc).isoformat()
     deleted_email = f"deleted+{uid}@deleted.zeroaxis.invalid"
