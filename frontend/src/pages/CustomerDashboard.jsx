@@ -96,7 +96,7 @@ function StatusBadge({ status, type = "order" }) {
   const map = {
     UNPAID: "gray", PAYMENT_SUBMITTED: "amber", PENDING_VERIFICATION: "amber", PAYMENT_PENDING: "amber",
     PAYMENT_VERIFIED: "green", PAYMENT_REJECTED: "red", REFUNDED: "gray",
-    CREATED: "blue", WORK_STARTED: "blue", IN_PROGRESS: "blue",
+    CREATED: "blue", ORDER_RECEIVED: "amber", DEVELOPER_ASSIGNED: "blue", WORK_STARTED: "blue", IN_PROGRESS: "blue",
     READY_FOR_DELIVERY: "amber", COMPLETED: "green", CANCELLED: "red",
   };
   return <span className={`zx-badge zx-badge-${map[status] || "gray"}`}>{String(status).replace(/_/g,' ')}</span>;
@@ -195,7 +195,7 @@ function NewOrder({ onCreated }) {
     e.preventDefault(); setBusy(true);
     try {
       const { data } = await api.post("/orders", form);
-      toast.success(`Order ${data.order_number} created`);
+      toast.success(`Order ${data.order_number} received. The team will review it before requesting payment.`);
       setForm({ service_id:"", requirement:"", notes:"" });
       onCreated && onCreated();
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
@@ -430,6 +430,9 @@ function MyOrders() {
             </div>
             <div className="mt-4 text-sm"><b>Amount:</b> ₹{Number(selected.amount).toLocaleString('en-IN')}</div>
             <div className="text-sm mt-1"><b>Requirement:</b> {selected.requirement}</div>
+            <div className="text-sm mt-1"><b>Assigned developer:</b> {selected.assigned_developer || "Awaiting admin assignment"}</div>
+            <div className="text-sm mt-1"><b>Payment schedule:</b> {selected.payment_timing === "FIRST" ? "Before work starts" : selected.payment_timing === "LAST" ? "After work is completed" : "To be confirmed by admin"}</div>
+            {!selected.payment_requested && <p className="mt-3 rounded-lg bg-[#F8F9FA] border border-[#E5E7EB] p-3 text-sm text-[#4B5563]">Order received. No payment is due yet. The administrator will assign a developer and request payment according to the agreed schedule.</p>}
 
             {selected.payment_status === "PAYMENT_VERIFIED" && (
               <div className="mt-3">
@@ -442,7 +445,7 @@ function MyOrders() {
             <FileAttachments parentType="order" parentId={selected.id} />
             <MessagesThread parentType="order" parentId={selected.id} />
 
-            {["UNPAID","PAYMENT_REJECTED","PAYMENT_PENDING"].includes(selected.payment_status) && (
+            {selected.payment_requested && ["UNPAID","PAYMENT_REJECTED","PAYMENT_PENDING"].includes(selected.payment_status) && (
               <div className="mt-4">
                 <div className="font-semibold text-sm">Submit Payment</div>
                 <PaymentForm orderId={selected.id} amount={selected.amount} onDone={async()=>{ await load(); openDetail(selected.id); }} />
