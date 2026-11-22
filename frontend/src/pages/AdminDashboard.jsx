@@ -124,7 +124,9 @@ function Customers() {
   const [record, setRecord] = useState(null);
   const [loadingRecord, setLoadingRecord] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
-  const [deleteAuth, setDeleteAuth] = useState({ admin_password: "", totp_code: "", confirm_customer_email: "" });
+  const [deleteAuth, setDeleteAuth] = useState({ admin_password: "", otp_challenge: "", email_otp: "", confirm_customer_email: "" });
+  const [otpRequested, setOtpRequested] = useState(false);
+  const [requestingOtp, setRequestingOtp] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   const load = () => api.get("/admin/customers").then(r => setItems(r.data)).catch(e => toast.error(formatApiErrorDetail(e.response?.data?.detail)));
@@ -162,6 +164,24 @@ function Customers() {
     } finally { setLoadingRecord(false); }
   };
 
+  const requestDeleteOtp = async () => {
+    if (!deleteTarget || !deleteAuth.admin_password) {
+      toast.error("Enter your administrator password first.");
+      return;
+    }
+    setRequestingOtp(true);
+    try {
+      const { data } = await api.post(`/admin/customers/${deleteTarget.id}/delete/request-otp`, {
+        admin_password: deleteAuth.admin_password,
+      });
+      setDeleteAuth(v => ({ ...v, otp_challenge: data.challenge, email_otp: "" }));
+      setOtpRequested(true);
+      toast.success("A six-digit confirmation code was sent to your administrator email.");
+    } catch (e) {
+      toast.error(formatApiErrorDetail(e.response?.data?.detail));
+    } finally { setRequestingOtp(false); }
+  };
+
   const deleteCustomer = async (e) => {
     e.preventDefault();
     if (!deleteTarget) return;
@@ -170,7 +190,8 @@ function Customers() {
       await api.post(`/admin/customers/${deleteTarget.id}/delete`, deleteAuth);
       toast.success("Customer login deactivated and profile anonymised. Financial and order records were retained.");
       setDeleteTarget(null);
-      setDeleteAuth({ admin_password: "", totp_code: "", confirm_customer_email: "" });
+      setDeleteAuth({ admin_password: "", otp_challenge: "", email_otp: "", confirm_customer_email: "" });
+      setOtpRequested(false);
       setSelected(null);
       setRecord(null);
       load();
@@ -217,7 +238,7 @@ function Customers() {
                 <td className="flex flex-wrap gap-3">
                   <button onClick={()=>viewRecord(u)} className="zx-link text-sm">View records</button>
                   <button onClick={()=>toggle(u.id)} className="zx-link text-sm">{u.disabled?"Enable":"Disable"}</button>
-                  <button onClick={()=>{setDeleteTarget(u);setDeleteAuth({admin_password:"",totp_code:"",confirm_customer_email:""});}} className="text-[#A11B1B] text-sm">Delete</button>
+                  <button onClick={()=>{setDeleteTarget(u);setDeleteAuth({admin_password:"",otp_challenge:"",email_otp:"",confirm_customer_email:""});setOtpRequested(false);}} className="text-[#A11B1B] text-sm">Delete</button>
                 </td>
               </tr>
             ))}
@@ -273,8 +294,17 @@ function Customers() {
             <p className="text-sm text-[#4B5563] mt-2">This permanently disables this customer login and anonymises their profile. Order/payment records and necessary accounting evidence will be retained.</p>
             <div className="mt-4"><label className="zx-label">Type customer email to confirm: {deleteTarget.email}</label><input required type="email" className="zx-input" value={deleteAuth.confirm_customer_email} onChange={e=>setDeleteAuth({...deleteAuth,confirm_customer_email:e.target.value})} /></div>
             <div className="mt-3"><label className="zx-label">Your administrator password</label><input required type="password" autoComplete="current-password" className="zx-input" value={deleteAuth.admin_password} onChange={e=>setDeleteAuth({...deleteAuth,admin_password:e.target.value})} /></div>
-            <div className="mt-3"><label className="zx-label">Current 6-digit authenticator code</label><input required inputMode="numeric" pattern="[0-9]{6}" maxLength={6} className="zx-input" value={deleteAuth.totp_code} onChange={e=>setDeleteAuth({...deleteAuth,totp_code:e.target.value.replace(/\D/g,"").slice(0,6)})} /></div>
-            <div className="flex justify-end gap-2 mt-5"><button type="button" className="zx-btn-outline" disabled={deleting} onClick={()=>setDeleteTarget(null)}>Cancel</button><button className="zx-btn-primary bg-[#A11B1B]" disabled={deleting}>{deleting?"Verifying…":"Confirm secure deletion"}</button></div>
+            {!otpRequested ? (
+              <div className="mt-4 flex justify-end">
+                <button type="button" className="zx-btn-primary" disabled={requestingOtp || !deleteAuth.admin_password} onClick={requestDeleteOtp}>{requestingOtp ? "Sending code…" : "Send email verification code"}</button>
+              </div>
+            ) : (
+              <>
+                <p className="text-xs text-[#4B5563] mt-3">A six-digit code was sent to your registered administrator email. It expires in 5 minutes.</p>
+                <div className="mt-3"><label className="zx-label">Email verification code</label><input required inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} className="zx-input" value={deleteAuth.email_otp} onChange={e=>setDeleteAuth({...deleteAuth,email_otp:e.target.value.replace(/\D/g,"").slice(0,6)})} /></div>
+              </>
+            )}
+            <div className="flex justify-end gap-2 mt-5"><button type="button" className="zx-btn-outline" disabled={deleting || requestingOtp} onClick={()=>{setDeleteTarget(null);setOtpRequested(false);}}>Cancel</button>{otpRequested && <button className="zx-btn-primary bg-[#A11B1B]" disabled={deleting || deleteAuth.email_otp.length!==6 || !deleteAuth.confirm_customer_email || !deleteAuth.admin_password}>{deleting?"Verifying…":"Confirm secure deletion"}</button>}</div>
           </form>
         </div>
       )}
