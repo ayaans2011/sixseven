@@ -124,11 +124,21 @@ async def admin_verify_email_otp(data: AdminOtpIn, response: Response, request: 
         raise HTTPException(status_code=429, detail="Too many incorrect codes. Start login again.")
 
     if not hmac.compare_digest(_digest(data.code), rec.get("otp_hash", "")):
+        # Compare-and-set the attempt count so concurrent requests cannot race
+        # past the five-attempt ceiling.
+        attempts = int(rec.get("attempts", 0))
+        update = {"$inc": {"attempts": 1}}
+        if attempts >= 4:
+            update["$set"] = {"used": True}
         result = await db.admin_login_challenges.update_one(
-            {"_id": rec["_id"], "used": False}, {"$inc": {"attempts": 1}}
+            {"_id": rec["_id"], "used": False, "attempts": attempts,
+             "expires_at": {"$gt": datetime.now(timezone.utc)}},
+            update,
         )
-        if result.matched_count != 1:
+        if result.modified_count != 1:
             raise HTTPException(status_code=400, detail="Sign-in session is invalid or expired.")
+        if attempts >= 4:
+            raise HTTPException(status_code=429, detail="Too many incorrect codes. Start login again.")
         raise HTTPException(status_code=401, detail="Incorrect email verification code.")
 
     # Consume the challenge atomically to prevent concurrent/replayed verification.
