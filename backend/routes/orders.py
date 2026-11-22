@@ -437,6 +437,9 @@ async def submit_manual_payment(oid: str, data: dict, user=Depends(get_current_u
         await db.notifications.insert_one({"user_id": str(admin_user["_id"]), "title": "Payment proof submitted",
             "body": order.get("order_number", "") + " · " + method.replace("_", " ").title() + " payment requires review.",
             "read": False, "created_at": now})
+    if order.get("customer_email"):
+        email_svc.payment_submitted(to_email=order["customer_email"], name=order.get("customer_name", ""),
+            order_number=order.get("order_number", ""), amount=float(order.get("amount", 0)), reference=reference)
     await audit_log("manual_payment_submitted", user["id"], user["email"], "order", oid,
         {"method": method, "amount": float(order.get("amount", 0)), "payment_reference": reference})
     return {"success": True, "payment_status": "PENDING_VERIFICATION"}
@@ -478,9 +481,13 @@ async def review_manual_payment(oid: str, data: dict, admin=Depends(require_admi
     if order.get("customer_id"):
         await db.notifications.insert_one({"user_id": order["customer_id"], "title": title, "body": body,
             "read": False, "created_at": now})
-    if decision == "APPROVE" and order.get("customer_email"):
-        email_svc.payment_verified(to_email=order["customer_email"], name=order.get("customer_name", ""),
-            order_number=order.get("order_number", ""), amount=float(order.get("amount", 0)))
+    if order.get("customer_email"):
+        if decision == "APPROVE":
+            email_svc.payment_verified(to_email=order["customer_email"], name=order.get("customer_name", ""),
+                order_number=order.get("order_number", ""), amount=float(order.get("amount", 0)))
+        else:
+            email_svc.payment_rejected(to_email=order["customer_email"], name=order.get("customer_name", ""),
+                order_number=order.get("order_number", ""), note=note)
     await audit_log("manual_payment_" + ("verified" if decision == "APPROVE" else "rejected"),
         admin["id"], admin["email"], "order", oid, {"payment_id": payment_id, "method": payment.get("method"), "note": note})
     return {"success": True, "payment_status": new_status}
@@ -513,8 +520,12 @@ async def update_order_workflow(oid: str, data: dict, admin=Depends(require_admi
         "order_status": next_status, "updated_at": now,
     }})
     if next_status != order.get("order_status"):
+        status_note = "Developer assigned" if developer else "Developer assignment cleared"
         await _add_status_history(db, oid, order.get("order_status", "ORDER_RECEIVED"), next_status,
-            admin["id"], admin["email"], "Developer assigned" if developer else "Developer assignment cleared")
+            admin["id"], admin["email"], status_note)
+        if order.get("customer_email"):
+            email_svc.status_changed(to_email=order["customer_email"], name=order.get("customer_name", ""),
+                order_number=order.get("order_number", ""), new_status=next_status, note=status_note)
     await audit_log("order_workflow_updated", admin["id"], admin["email"], "order", oid,
         {"assigned_developer": developer or None, "payment_timing": timing, "previous_developer": previous_developer})
     if order.get("customer_id"):
@@ -560,6 +571,9 @@ async def request_order_payment(oid: str, admin=Depends(require_admin)):
             "body": "ZEROAXIS has requested " + ("advance" if stage == "BEFORE_WORK" else "final") +
                 " payment for order " + order.get("order_number", "") + ". You can now open the order and submit payment.",
             "read": False, "created_at": now})
+    if order.get("customer_email"):
+        email_svc.payment_requested(to_email=order["customer_email"], name=order.get("customer_name", ""),
+            order_number=order.get("order_number", ""), amount=float(order.get("amount", 0)), stage=stage)
     await audit_log("order_payment_requested", admin["id"], admin["email"], "order", oid, {"stage": stage})
     return {"success": True, "payment_due_stage": stage, "payment_requested": True}
 
