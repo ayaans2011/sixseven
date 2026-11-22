@@ -223,6 +223,10 @@ function PaymentForm({ orderId, amount, onDone }) {
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
   const [visible, setVisible] = useState(true);
+  const [manualMethod, setManualMethod] = useState("BANK_TRANSFER");
+  const [manualReference, setManualReference] = useState("");
+  const [manualFile, setManualFile] = useState(null);
+  const [manualBusy, setManualBusy] = useState(false);
   const onDoneRef = useRef(onDone);
 
   useEffect(() => {
@@ -243,6 +247,26 @@ function PaymentForm({ orderId, amount, onDone }) {
       setPayment(data);
     } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
     finally { setBusy(false); }
+  };
+
+  const submitManualPayment = async () => {
+    if (!manualFile) return toast.error("Upload a payment receipt or proof first");
+    setManualBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("parent_type", "order");
+      fd.append("parent_id", orderId);
+      fd.append("note", "Manual payment proof");
+      fd.append("file", manualFile);
+      const uploaded = await api.post("/files/upload", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      await api.post("/orders/" + orderId + "/payment/manual-submit", {
+        method: manualMethod, reference: manualReference, proof_file_id: uploaded.data.id,
+      });
+      toast.success("Payment proof submitted. It will remain pending until admin verification.");
+      onDoneRef.current?.();
+      setVisible(false);
+    } catch (e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
+    finally { setManualBusy(false); }
   };
 
   const checkStatus = async () => {
@@ -298,6 +322,18 @@ function PaymentForm({ orderId, amount, onDone }) {
                 {busy ? "Loading payment options…" : "Continue with UPI"}
               </button>
               <p className="text-xs text-center text-[#6B7280]">Payment options will open here. No QR code is shown for direct UPI app payments.</p>
+              <div className="border-t border-[#E5E7EB] pt-4 space-y-3">
+                <div className="text-sm font-semibold text-[#0A1128]">Or record an offline payment</div>
+                <p className="text-xs text-[#6B7280]">For cheque, cash or bank transfer. Upload a receipt or other payment evidence. This does not mark the order as paid until an admin verifies it.</p>
+                <select className="zx-input" value={manualMethod} onChange={e=>setManualMethod(e.target.value)}>
+                  <option value="BANK_TRANSFER">Bank transfer</option><option value="CHEQUE">Cheque</option><option value="CASH">Cash</option>
+                </select>
+                <input className="zx-input" maxLength={120} placeholder="Transaction / cheque / receipt reference (optional)" value={manualReference} onChange={e=>setManualReference(e.target.value)} />
+                <input className="zx-input" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,application/pdf,image/*" onChange={e=>setManualFile(e.target.files?.[0] || null)} />
+                <button type="button" disabled={manualBusy || !manualFile} onClick={submitManualPayment} className="zx-btn-outline w-full justify-center">
+                  {manualBusy ? "Uploading proof…" : "Submit proof for verification"}
+                </button>
+              </div>
             </div>
           ) : (
             <div className="space-y-3">
