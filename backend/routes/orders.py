@@ -249,6 +249,10 @@ async def _mark_famgateway_paid(db, payment: dict, order: dict, gateway_data: di
             "sender_name": gateway_data.get("sender_name"),
             "payment_time": gateway_data.get("payment_time"),
             "verified_at": now, "verified_by": "FamGateway"}})
+        if order.get("coupon_id"):
+            redeemed = await db.orders.update_one({"_id": order["_id"], "coupon_redeemed": {"$ne": True}}, {"$set": {"coupon_redeemed": True}})
+            if redeemed.modified_count:
+                await db.coupons.update_one({"_id": ObjectId(order["coupon_id"])}, {"$inc": {"used_count": 1}})
         if order.get("customer_id"):
             await db.notifications.insert_one({"user_id": order["customer_id"], "title": "Payment verified",
                 "body": "Payment for order " + order["order_number"] + " has been confirmed.",
@@ -485,6 +489,10 @@ async def review_manual_payment(oid: str, data: dict, admin=Depends(require_admi
     new_status = "PAYMENT_VERIFIED" if decision == "APPROVE" else "PAYMENT_REJECTED"
     await db.orders.update_one({"_id": order["_id"], "payment_status": {"$ne": "PAYMENT_VERIFIED"}},
         {"$set": {"payment_status": new_status, "payment_requested": False, "updated_at": now}})
+    if decision == "APPROVE" and order.get("coupon_id"):
+        redeemed = await db.orders.update_one({"_id": order["_id"], "coupon_redeemed": {"$ne": True}}, {"$set": {"coupon_redeemed": True}})
+        if redeemed.modified_count:
+            await db.coupons.update_one({"_id": ObjectId(order["coupon_id"])}, {"$inc": {"used_count": 1}})
     title = "Payment verified" if decision == "APPROVE" else "Payment proof rejected"
     body = "Payment for order " + order.get("order_number", "") + (" has been verified." if decision == "APPROVE" else " was rejected. Reason: " + note)
     if order.get("customer_id"):
