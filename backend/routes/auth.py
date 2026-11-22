@@ -4,17 +4,23 @@ from fastapi import APIRouter, HTTPException, Request, Response, Depends
 from bson import ObjectId
 import secrets
 import hashlib
+import hmac
 
 from database import get_db
 from security import (
     hash_password, verify_password, create_access_token, create_refresh_token,
     set_auth_cookies, clear_auth_cookies, get_current_user,
-    check_lockout, record_failed_login, clear_login_attempts, audit_log,
+    check_lockout, record_failed_login, clear_login_attempts, audit_log, get_jwt_secret,
 )
 from models import RegisterIn, LoginIn, ForgotPasswordIn, ResetPasswordIn, RegisterOtpIn, ActivateAccountIn
-from services.email import password_reset, registration_otp
+from services.email import send_password_reset, send_registration_otp
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+
+def _otp_digest(value: str) -> str:
+    return hmac.new(get_jwt_secret().encode("utf-8"), value.encode("utf-8"), hashlib.sha256).hexdigest()
+
 
 
 def _serialize_user(u: dict) -> dict:
@@ -31,23 +37,34 @@ def _serialize_user(u: dict) -> dict:
 
 
 @router.post("/register")
-async def register(data: RegisterIn):
+async def register(data: RegisterIn, request: Request):
     db = get_db()
     email = data.email.lower().strip()
-    if await db.users.find_one({"email": email}):
+    if await db.users.find_one({"email": email}, {"_id": 1}):
         raise HTTPException(status_code=400, detail="Email already registered")
-    otp = f"{secrets.randbelow(1000000):06d}"
-    otp_hash = hashlib.sha256(otp.encode("utf-8")).hexdigest()
     now = datetime.now(timezone.utc)
-    await db.registration_email_otps.update_many({"email": email, "used": False}, {"$set": {"used": True}})
-    await db.registration_email_otps.insert_one({
-        "email": email, "name": data.name.strip(), "phone": data.phone,
-        "password_hash": await asyncio.to_thread(hash_password, data.password), "otp_hash": otp_hash,
-        "used": False, "attempts": 0, "expires_at": now + timedelta(minutes=10), "created_at": now,
+    recent = await db.registration_email_otps.count_documents({
+        "email": email, "created_at": {"$gt": now - timedelta(minutes=15)}
     })
-    registration_otp(to_email=email, name=data.name.strip(), otp=otp)
+    if recent >= 3:
+        raise HTTPException(status_code=429, detail="Too many verification requests. Try again in 15 minutes.")
+    otp = f"{secrets.randbelow(1_000_000):06d}"
+    await db.registration_email_otps.update_many(
+        {"email": email, "used": False}, {"$set": {"used": True}}
+    )
+    result = await db.registration_email_otps.insert_one({
+        "email": email, "name": data.name.strip(), "phone": data.phone,
+        "password_hash": await asyncio.to_thread(hash_password, data.password),
+        "otp_hash": _otp_digest(otp), "used": False, "attempts": 0,
+        "expires_at": now + timedelta(minutes=10), "created_at": now,
+    })
+    delivered = await send_registration_otp(to_email=email, name=data.name.strip(), otp=otp)
+    if not delivered:
+        await db.registration_email_otps.update_one(
+            {"_id": result.inserted_id, "used": False}, {"$set": {"used": True}}
+        )
+        raise HTTPException(status_code=503, detail="We couldn't send the verification email. Please try again later.")
     return {"message": "A verification code has been sent to your email."}
-
 
 @router.post("/register/verify-otp")
 async def verify_registration_otp(data: RegisterOtpIn, response: Response):
