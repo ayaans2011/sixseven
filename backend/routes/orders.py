@@ -37,7 +37,11 @@ def _serialize(o: dict) -> dict:
         "requirement": o.get("requirement"),
         "notes": o.get("notes"),
         "payment_status": o.get("payment_status", "UNPAID"),
-        "order_status": o.get("order_status", "CREATED"),
+        "order_status": o.get("order_status", "ORDER_RECEIVED"),
+        "assigned_developer": o.get("assigned_developer"),
+        "payment_timing": o.get("payment_timing"),
+        "payment_requested": bool(o.get("payment_requested", False)),
+        "payment_due_stage": o.get("payment_due_stage"),
         "created_at": o.get("created_at"),
         "updated_at": o.get("updated_at"),
     }
@@ -81,14 +85,18 @@ async def create_order(data: OrderIn, user=Depends(get_current_user)):
         "requirement": data.requirement,
         "notes": data.notes or "",
         "payment_status": "UNPAID",
-        "order_status": "CREATED",
+        "order_status": "ORDER_RECEIVED",
+        "assigned_developer": None,
+        "payment_timing": None,
+        "payment_requested": False,
+        "payment_due_stage": None,
         "created_at": now,
         "updated_at": now,
     }
     res = await db.orders.insert_one(doc)
     doc["_id"] = res.inserted_id
-    await _add_status_history(db, str(res.inserted_id), "", "CREATED", user["id"], user["email"], "Order created")
-    await notify_user(user["id"], "Order created", f"Your order {number} has been created for {service['name']}. Please complete payment to proceed.", now=now)
+    await _add_status_history(db, str(res.inserted_id), "", "ORDER_RECEIVED", user["id"], user["email"], "Order received; awaiting admin review")
+    await notify_user(user["id"], "Order received", f"We received order {number} for {service['name']}. Our team will review it, assign a developer and confirm when payment is due.", now=now)
     admin_msg = f"Order {number} was created by {user.get('name') or user['email']} for {service['name']} (₹{float(service.get('price', 0)):,.0f})."
     await notify_admins("New order received", admin_msg, now=now)
     admins = await db.users.find({"role": "admin", "disabled": {"$ne": True}}, {"email": 1}).to_list(1000)
@@ -224,7 +232,7 @@ async def _mark_famgateway_paid(db, payment: dict, order: dict, gateway_data: di
         raise HTTPException(status_code=409, detail="Transaction reference already used")
     changed = await db.orders.update_one(
         {"_id": order["_id"], "payment_status": {"$ne": "PAYMENT_VERIFIED"}},
-        {"$set": {"payment_status": "PAYMENT_VERIFIED", "order_status": "PAYMENT_VERIFIED", "updated_at": now}})
+        {"$set": {"payment_status": "PAYMENT_VERIFIED", "payment_requested": False, "updated_at": now}})
     if changed.modified_count:
         await db.payments.update_one({"_id": payment["_id"]}, {"$set": {
             "status": "PAYMENT_VERIFIED", "utr": utr,
@@ -255,6 +263,8 @@ async def create_famgateway_payment(oid: str, user=Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Order not found")
     if order.get("payment_status") == "PAYMENT_VERIFIED":
         raise HTTPException(status_code=400, detail="Order already paid")
+    if not order.get("payment_requested"):
+        raise HTTPException(status_code=403, detail="Payment has not been requested by the administrator yet")
     amount = float(order.get("amount", 0))
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Invalid order amount")
@@ -400,6 +410,8 @@ async def submit_manual_payment(oid: str, data: dict, user=Depends(get_current_u
         raise HTTPException(status_code=404, detail="Order or proof not found")
     if proof.get("mime") not in {"application/pdf", "image/jpeg", "image/png", "image/webp"}:
         raise HTTPException(status_code=400, detail="Proof must be a PDF or image")
+    if not order.get("payment_requested"):
+        raise HTTPException(status_code=403, detail="Payment has not been requested by the administrator yet")
     if order.get("payment_status") not in {"UNPAID", "PAYMENT_REJECTED"}:
         raise HTTPException(status_code=409, detail="This order already has a payment in progress or is paid")
     pending = await db.payments.find_one({"order_id": oid, "provider": "manual", "status": "PENDING_VERIFICATION"})
@@ -462,7 +474,7 @@ async def review_manual_payment(oid: str, data: dict, admin=Depends(require_admi
         raise HTTPException(status_code=409, detail="Payment was already reviewed")
     new_status = "PAYMENT_VERIFIED" if decision == "APPROVE" else "PAYMENT_REJECTED"
     await db.orders.update_one({"_id": order["_id"], "payment_status": {"$ne": "PAYMENT_VERIFIED"}},
-        {"$set": {"payment_status": new_status, "updated_at": now}})
+        {"$set": {"payment_status": new_status, "payment_requested": False, "updated_at": now}})
     title = "Payment verified" if decision == "APPROVE" else "Payment proof rejected"
     body = "Payment for order " + order.get("order_number", "") + (" has been verified." if decision == "APPROVE" else " was rejected. Reason: " + note)
     if order.get("customer_id"):
@@ -474,6 +486,85 @@ async def review_manual_payment(oid: str, data: dict, admin=Depends(require_admi
     await audit_log("manual_payment_" + ("verified" if decision == "APPROVE" else "rejected"),
         admin["id"], admin["email"], "order", oid, {"payment_id": payment_id, "method": payment.get("method"), "note": note})
     return {"success": True, "payment_status": new_status}
+
+
+@router.post("/{oid}/workflow")
+async def update_order_workflow(oid: str, data: dict, admin=Depends(require_admin)):
+    db = get_db()
+    try:
+        order = await db.orders.find_one({"_id": ObjectId(oid)})
+    except Exception:
+        order = None
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    developer = str(data.get("assigned_developer") or "").strip()[:120]
+    timing = str(data.get("payment_timing") or "").upper().strip()
+    if timing not in {"FIRST", "LAST"}:
+        raise HTTPException(status_code=400, detail="Choose payment before work or after work")
+    if order.get("payment_status") == "PAYMENT_VERIFIED" and timing != order.get("payment_timing"):
+        raise HTTPException(status_code=409, detail="Payment timing cannot be changed after payment is verified")
+    now = datetime.now(timezone.utc).isoformat()
+    previous_developer = order.get("assigned_developer")
+    next_status = order.get("order_status", "ORDER_RECEIVED")
+    if developer and next_status == "ORDER_RECEIVED":
+        next_status = "DEVELOPER_ASSIGNED"
+    elif not developer and next_status == "DEVELOPER_ASSIGNED":
+        next_status = "ORDER_RECEIVED"
+    await db.orders.update_one({"_id": order["_id"]}, {"$set": {
+        "assigned_developer": developer or None, "payment_timing": timing,
+        "order_status": next_status, "updated_at": now,
+    }})
+    if next_status != order.get("order_status"):
+        await _add_status_history(db, oid, order.get("order_status", "ORDER_RECEIVED"), next_status,
+            admin["id"], admin["email"], "Developer assigned" if developer else "Developer assignment cleared")
+    await audit_log("order_workflow_updated", admin["id"], admin["email"], "order", oid,
+        {"assigned_developer": developer or None, "payment_timing": timing, "previous_developer": previous_developer})
+    if order.get("customer_id"):
+        await db.notifications.insert_one({"user_id": order["customer_id"], "title": "Order plan updated",
+            "body": "Your order " + order.get("order_number", "") + " has been assigned to " +
+                (developer if developer else "our team") + ". Payment is scheduled " +
+                ("before work starts." if timing == "FIRST" else "after the work is completed."),
+            "read": False, "created_at": now})
+    return {"success": True, "assigned_developer": developer or None, "payment_timing": timing, "order_status": next_status}
+
+
+@router.post("/{oid}/payment/request")
+async def request_order_payment(oid: str, admin=Depends(require_admin)):
+    db = get_db()
+    try:
+        order = await db.orders.find_one({"_id": ObjectId(oid)})
+    except Exception:
+        order = None
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.get("payment_status") == "PAYMENT_VERIFIED":
+        raise HTTPException(status_code=409, detail="Order is already paid")
+    if not order.get("payment_timing"):
+        raise HTTPException(status_code=409, detail="Set the payment timing in the order workflow first")
+    if order.get("payment_timing") == "FIRST":
+        if not order.get("assigned_developer"):
+            raise HTTPException(status_code=409, detail="Assign a developer before requesting the advance payment")
+        if order.get("order_status") not in {"ORDER_RECEIVED", "DEVELOPER_ASSIGNED"}:
+            raise HTTPException(status_code=409, detail="Advance payment can only be requested before work starts")
+        stage = "BEFORE_WORK"
+    else:
+        if order.get("order_status") not in {"READY_FOR_DELIVERY", "COMPLETED"}:
+            raise HTTPException(status_code=409, detail="Final payment can be requested when the work is ready for delivery")
+        stage = "AFTER_WORK"
+    if order.get("payment_status") in {"PENDING_VERIFICATION", "PAYMENT_PENDING"}:
+        raise HTTPException(status_code=409, detail="A payment is already awaiting confirmation or review")
+    now = datetime.now(timezone.utc).isoformat()
+    await db.orders.update_one({"_id": order["_id"]}, {"$set": {
+        "payment_requested": True, "payment_due_stage": stage, "updated_at": now,
+    }})
+    if order.get("customer_id"):
+        await db.notifications.insert_one({"user_id": order["customer_id"], "title": "Payment requested",
+            "body": "ZEROAXIS has requested " + ("advance" if stage == "BEFORE_WORK" else "final") +
+                " payment for order " + order.get("order_number", "") + ". You can now open the order and submit payment.",
+            "read": False, "created_at": now})
+    await audit_log("order_payment_requested", admin["id"], admin["email"], "order", oid, {"stage": stage})
+    return {"success": True, "payment_due_stage": stage, "payment_requested": True}
+
 
 # Admin: update order status
 @router.post("/{oid}/status")
