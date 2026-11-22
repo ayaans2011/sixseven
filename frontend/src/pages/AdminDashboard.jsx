@@ -388,14 +388,17 @@ function Enquiries() {
   );
 }
 
-const ORDER_STATUSES = ["CREATED","PAYMENT_PENDING","PAYMENT_SUBMITTED","PENDING_VERIFICATION","PAYMENT_VERIFIED","WORK_STARTED","IN_PROGRESS","READY_FOR_DELIVERY","COMPLETED","CANCELLED"];
-const EDITABLE_ORDER_STATUSES = ["CREATED","WORK_STARTED","IN_PROGRESS","READY_FOR_DELIVERY","COMPLETED","CANCELLED"];
+const ORDER_STATUSES = ["CREATED","ORDER_RECEIVED","DEVELOPER_ASSIGNED","PAYMENT_PENDING","PAYMENT_SUBMITTED","PENDING_VERIFICATION","PAYMENT_VERIFIED","WORK_STARTED","IN_PROGRESS","READY_FOR_DELIVERY","COMPLETED","CANCELLED"];
+const EDITABLE_ORDER_STATUSES = ["CREATED","ORDER_RECEIVED","DEVELOPER_ASSIGNED","WORK_STARTED","IN_PROGRESS","READY_FOR_DELIVERY","COMPLETED","CANCELLED"];
 
 function Orders() {
   const [items, setItems] = useState([]);
   const [sel, setSel] = useState(null);
   const [note, setNote] = useState("");
   const [newStatus, setNewStatus] = useState("");
+  const [workflowDeveloper, setWorkflowDeveloper] = useState("");
+  const [workflowPaymentTiming, setWorkflowPaymentTiming] = useState("FIRST");
+  const [workflowBusy, setWorkflowBusy] = useState(false);
   const [filters, setFilters] = useState({ q: "", status: "", payment_status: "", date_from: "", date_to: "" });
   const load = () => {
     const params = new URLSearchParams();
@@ -420,7 +423,28 @@ function Orders() {
       setTimeout(()=>URL.revokeObjectURL(url), 2000);
     } catch { toast.error("Export failed"); }
   };
-  const open = async (id) => { const { data } = await api.get(`/orders/${id}`); setSel(data); setNewStatus(data.order_status); setNote(""); };
+  const open = async (id) => { const { data } = await api.get(`/orders/${id}`); setSel(data); setNewStatus(data.order_status); setNote(""); setWorkflowDeveloper(data.assigned_developer || ""); setWorkflowPaymentTiming(data.payment_timing || "FIRST"); };
+  const saveWorkflow = async () => {
+    if (!sel) return;
+    setWorkflowBusy(true);
+    try {
+      await api.post(`/orders/${sel.id}/workflow`, { assigned_developer: workflowDeveloper, payment_timing: workflowPaymentTiming });
+      toast.success("Developer assignment and payment schedule saved");
+      await open(sel.id); load();
+    } catch(e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
+    finally { setWorkflowBusy(false); }
+  };
+  const requestPayment = async () => {
+    if (!sel) return;
+    if (!window.confirm("Send a payment request to this customer now?")) return;
+    setWorkflowBusy(true);
+    try {
+      await api.post(`/orders/${sel.id}/payment/request`);
+      toast.success("Payment request sent to customer");
+      await open(sel.id); load();
+    } catch(e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
+    finally { setWorkflowBusy(false); }
+  };
   const updateStatus = async () => {
     try { await api.post(`/orders/${sel.id}/status`, { order_status: newStatus, note }); toast.success("Status updated"); open(sel.id); load(); }
     catch(e){ toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
@@ -538,6 +562,29 @@ function Orders() {
             </div>
             <div className="text-sm mt-2"><b>Amount:</b> ₹{Number(sel.amount).toLocaleString('en-IN')}</div>
             <div className="text-sm"><b>Requirement:</b> {sel.requirement}</div>
+
+            <section className="zx-card mt-4 space-y-3" data-testid="order-workflow-controls">
+              <div className="font-semibold text-sm">Developer and payment workflow</div>
+              <div>
+                <label className="zx-label">Assigned developer</label>
+                <input className="zx-input" maxLength={120} placeholder="Enter developer name" value={workflowDeveloper} onChange={e=>setWorkflowDeveloper(e.target.value)} />
+              </div>
+              <div>
+                <label className="zx-label">When should the customer pay?</label>
+                <select className="zx-input" value={workflowPaymentTiming} onChange={e=>setWorkflowPaymentTiming(e.target.value)}>
+                  <option value="FIRST">First — before work starts (advance)</option>
+                  <option value="LAST">Last — after work is completed (final payment)</option>
+                </select>
+              </div>
+              <button className="zx-btn-primary" disabled={workflowBusy} onClick={saveWorkflow}>{workflowBusy ? "Saving…" : "Save workflow"}</button>
+              <div className="border-t border-[#E5E7EB] pt-3">
+                <div className="text-xs text-[#6B7280] mb-2">Payment request is sent only when you press this button. For advance payment, assign a developer first. For final payment, move the order to Ready for Delivery.</div>
+                <button className="zx-btn-outline" disabled={workflowBusy || sel.payment_requested || sel.payment_status === "PAYMENT_VERIFIED"} onClick={requestPayment}>
+                  {sel.payment_requested ? "Payment request already sent" : workflowPaymentTiming === "FIRST" ? "Request advance payment" : "Request final payment"}
+                </button>
+              </div>
+              <div className="text-xs text-[#6B7280]">Current assignment: {sel.assigned_developer || "Not assigned"} · Payment timing: {sel.payment_timing === "FIRST" ? "Before work" : sel.payment_timing === "LAST" ? "After work" : "Not set"} · Request: {sel.payment_requested ? "Sent" : "Not sent"}</div>
+            </section>
 
             {sel.payment_status === "PAYMENT_VERIFIED" && (
               <button className="zx-btn-primary mt-3" onClick={downloadInvoice} data-testid={`admin-invoice-${sel.order_number}`}>
