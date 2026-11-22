@@ -17,6 +17,24 @@ from urllib.parse import urlparse
 logger = logging.getLogger(__name__)
 
 EMAIL_BASE_URL = "https://integrations.emergentagent.com"
+_email_client: httpx.AsyncClient | None = None
+
+
+async def _get_email_client() -> httpx.AsyncClient:
+    global _email_client
+    if _email_client is None or _email_client.is_closed:
+        _email_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(15.0, connect=5.0),
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+        )
+    return _email_client
+
+
+async def close_email_client() -> None:
+    global _email_client
+    if _email_client is not None and not _email_client.is_closed:
+        await _email_client.aclose()
+    _email_client = None
 
 
 def _cfg(key: str, default: str = "") -> str:
@@ -116,12 +134,12 @@ async def _send_email(*, to: str, subject: str, html: str) -> str | None:
     if reply_to:
         payload["contact_email"] = reply_to
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
-                f"{EMAIL_BASE_URL}/api/v1/email/send",
-                headers={"X-Email-Key": key},
-                json=payload,
-            )
+        client = await _get_email_client()
+        resp = await client.post(
+            f"{EMAIL_BASE_URL}/api/v1/email/send",
+            headers={"X-Email-Key": key},
+            json=payload,
+        )
         resp.raise_for_status()
         return resp.json().get("id")
     except httpx.HTTPStatusError as e:
