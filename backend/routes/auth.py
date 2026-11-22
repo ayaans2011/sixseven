@@ -221,20 +221,40 @@ async def forgot_password(data: ForgotPasswordIn):
 async def reset_password(data: ResetPasswordIn):
     db = get_db()
     token_hash = hashlib.sha256(data.token.encode("utf-8")).hexdigest()
-    rec = await db.password_reset_tokens.find_one({"token_hash": token_hash, "used": False, "expires_at": {"$gt": datetime.now(timezone.utc)}})
+    now = datetime.now(timezone.utc)
+    rec = await db.password_reset_tokens.find_one({
+        "token_hash": token_hash, "used": False, "expires_at": {"$gt": now}
+    })
     if not rec:
         raise HTTPException(status_code=400, detail="Invalid or expired reset link")
-    if rec.get("otp_used"):
+    if rec.get("otp_used") or rec.get("otp_attempts", 0) >= 5:
         raise HTTPException(status_code=400, detail="Invalid or expired verification code")
-    if rec.get("otp_attempts", 0) >= 5:
-        await db.password_reset_tokens.update_one({"_id": rec["_id"]}, {"$set": {"used": True}})
-        raise HTTPException(status_code=400, detail="Too many verification attempts. Please request a new reset code.")
-    supplied_otp = _otp_digest(data.otp)
-    if not rec.get("otp_hash") or not secrets.compare_digest(supplied_otp, rec["otp_hash"]):
-        await db.password_reset_tokens.update_one({"_id": rec["_id"]}, {"$inc": {"otp_attempts": 1}})
+
+    consumed = await db.password_reset_tokens.update_one(
+        {"_id": rec["_id"], "used": False, "otp_used": False,
+         "otp_attempts": {"$lt": 5}, "expires_at": {"$gt": now},
+         "otp_hash": _otp_digest(data.otp)},
+        {"$set": {"used": True, "otp_used": True, "used_at": now}},
+    )
+    if consumed.modified_count != 1:
+        await db.password_reset_tokens.update_one(
+            {"_id": rec["_id"], "used": False, "otp_used": False,
+             "otp_attempts": {"$lt": 5}},
+            {"$inc": {"otp_attempts": 1}},
+        )
         raise HTTPException(status_code=400, detail="Invalid or expired verification code")
-    result = await db.users.update_one({"_id": ObjectId(rec["user_id"]), "role": "customer", "account_status": {"$ne": "deleted"}}, {"$set": {"password_hash": await asyncio.to_thread(hash_password, data.new_password), "account_status": "active", "activated_at": datetime.now(timezone.utc)}})
+
+    try:
+        user_id = ObjectId(rec["user_id"])
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset link")
+    result = await db.users.update_one(
+        {"_id": user_id, "role": "customer", "account_status": {"$ne": "deleted"}},
+        {"$set": {
+            "password_hash": await asyncio.to_thread(hash_password, data.new_password),
+            "account_status": "active", "activated_at": now,
+        }},
+    )
     if result.matched_count != 1:
         raise HTTPException(status_code=400, detail="Invalid or expired reset link")
-    await db.password_reset_tokens.update_one({"_id": rec["_id"]}, {"$set": {"used": True, "otp_used": True}})
     return {"success": True}
