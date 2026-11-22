@@ -450,6 +450,20 @@ async def send_admin_login_otp(*, to_email: str, name: str, otp: str) -> bool:
     return bool(await _send_email(to=to_email, subject=subject, html=_wrap(inner)))
 
 
+async def send_admin_sensitive_action_otp(*, to_email: str, name: str, otp: str, action: str) -> bool:
+    """Send a short-lived email code for a sensitive administrator action."""
+    safe_action = escape(action or "sensitive account action")
+    subject = "ZEROAXIS administrator confirmation code"
+    inner = (
+        f'<p>Hi {escape(name or "Administrator")},</p>'
+        f'<p>Use this one-time code to confirm: <b>{safe_action}</b>.</p>'
+        f'<p style="font-size:26px;letter-spacing:6px;font-weight:700"><b>{escape(otp)}</b></p>'
+        f'<p>This code expires in <b>5 minutes</b>, can be used once, and must not be shared.</p>'
+        f'<p>If you did not request this, ignore this email and secure your administrator account.</p>'
+    )
+    return bool(await _send_email(to=to_email, subject=subject, html=_wrap(inner)))
+
+
 async def send_registration_otp(*, to_email: str, name: str, otp: str) -> bool:
     subject = "Verify your ZEROAXIS email"
     inner = (
