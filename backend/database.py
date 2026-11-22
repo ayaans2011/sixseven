@@ -29,7 +29,7 @@ async def close_db():
 async def ensure_indexes():
     db = get_db()
     await db.users.create_index("email", unique=True)
-    await db.login_attempts.create_index("identifier", unique=True)
+    await db.login_attempts.create_index("identifier")
     await db.password_reset_tokens.create_index("expires_at", expireAfterSeconds=0)
     await db.password_reset_tokens.create_index("token_hash", unique=True)
     await db.registration_email_otps.create_index("expires_at", expireAfterSeconds=0)
