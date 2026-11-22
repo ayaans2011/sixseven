@@ -195,10 +195,18 @@ async def _famgateway_request(method: str, path: str, *, params=None, payload=No
     if not api_key:
         raise HTTPException(status_code=503, detail="Online payments are not configured")
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=False) as client:
             response = await client.request(method, FAMGATEWAY_BASE_URL + path,
                 headers={"X-Api-Key": api_key, "Accept": "application/json"},
                 params=params, json=payload)
+            if 300 <= response.status_code < 400:
+                from urllib.parse import urlsplit
+                location = response.headers.get("location", "")
+                target = urlsplit(location)
+                # Log only the redirect origin and path; never log query parameters or credentials.
+                logger.error("FamGateway unexpected redirect: status=%s target=%s%s",
+                    response.status_code, target.netloc, target.path)
+                raise HTTPException(status_code=502, detail="Payment provider redirected the request unexpectedly")
             response.raise_for_status()
             data = response.json()
     except httpx.HTTPStatusError as exc:
