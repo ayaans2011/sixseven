@@ -201,6 +201,14 @@ async def forgot_password(data: ForgotPasswordIn):
     email = data.email.lower().strip()
     user = await db.users.find_one({"email": email})
     if user:
+        now = datetime.now(timezone.utc)
+        recent = await db.password_reset_tokens.count_documents({
+            "user_id": str(user["_id"]),
+            "created_at": {"$gt": now - timedelta(minutes=15)},
+        })
+        # Keep the response identical for known and unknown email addresses.
+        if recent >= 3:
+            return {"message": "If the email exists, a password reset link has been sent."}
         await db.password_reset_tokens.update_many({"user_id": str(user["_id"]), "used": False}, {"$set": {"used": True}})
         token = secrets.token_urlsafe(32)
         token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
