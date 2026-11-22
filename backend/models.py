@@ -43,9 +43,14 @@ class AdminCustomerCreateIn(BaseModel):
     company: Optional[str] = Field(default=None, max_length=120)
 
 
+class AdminCustomerDeleteOtpRequestIn(BaseModel):
+    admin_password: str = Field(min_length=1, max_length=128)
+
+
 class AdminCustomerDeleteIn(BaseModel):
     admin_password: str = Field(min_length=1, max_length=128)
-    totp_code: str = Field(min_length=6, max_length=6)
+    otp_challenge: str = Field(min_length=20, max_length=200)
+    email_otp: str = Field(min_length=6, max_length=6)
     confirm_customer_email: EmailStr
 
 
