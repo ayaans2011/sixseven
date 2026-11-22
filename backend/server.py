@@ -11,6 +11,7 @@ from starlette.middleware.cors import CORSMiddleware
 from datetime import datetime, timezone
 
 from database import get_db, ensure_indexes, close_db
+from services.email import close_email_client
 from security import hash_password, verify_password
 from routes.auth import router as auth_router
 from routes.admin_auth import router as admin_auth_router
@@ -170,4 +171,5 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown():
+    await close_email_client()
     await close_db()
