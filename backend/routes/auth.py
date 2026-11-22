@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Request, Response, Depends
 from bson import ObjectId
@@ -41,7 +42,7 @@ async def register(data: RegisterIn):
     await db.registration_email_otps.update_many({"email": email, "used": False}, {"$set": {"used": True}})
     await db.registration_email_otps.insert_one({
         "email": email, "name": data.name.strip(), "phone": data.phone,
-        "password_hash": hash_password(data.password), "otp_hash": otp_hash,
+        "password_hash": await asyncio.to_thread(hash_password, data.password), "otp_hash": otp_hash,
         "used": False, "attempts": 0, "expires_at": now + timedelta(minutes=10), "created_at": now,
     })
     registration_otp(to_email=email, name=data.name.strip(), otp=otp)
@@ -88,7 +89,7 @@ async def activate_account(data: ActivateAccountIn):
         user_id = ObjectId(rec["user_id"])
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid account activation link")
-    result = await db.users.update_one({"_id": user_id, "role": "customer", "account_status": {"$ne": "deleted"}}, {"$set": {"password_hash": hash_password(data.new_password), "account_status": "active", "activated_at": datetime.now(timezone.utc)}})
+    result = await db.users.update_one({"_id": user_id, "role": "customer", "account_status": {"$ne": "deleted"}}, {"$set": {"password_hash": await asyncio.to_thread(hash_password, data.new_password), "account_status": "active", "activated_at": datetime.now(timezone.utc)}})
     if result.matched_count != 1:
         raise HTTPException(status_code=400, detail="Account activation link is invalid")
     await db.account_activation_tokens.update_one({"_id": rec["_id"]}, {"$set": {"used": True, "used_at": datetime.now(timezone.utc)}})
@@ -105,7 +106,7 @@ async def login(data: LoginIn, request: Request, response: Response):
     user = await db.users.find_one({"email": email})
     if user and user.get("account_status") == "pending_activation":
         raise HTTPException(status_code=403, detail="Set your password using the invitation email or Forgot Password first.")
-    if not user or not verify_password(data.password, user.get("password_hash", "")):
+    if not user or not await asyncio.to_thread(verify_password, data.password, user.get("password_hash", "")):
         await record_failed_login(identifier)
         raise HTTPException(status_code=401, detail="Invalid email or password")
     if user.get("disabled") or user.get("account_status") == "deleted":
