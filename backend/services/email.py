@@ -276,6 +276,20 @@ def order_created(*, to_email: str, name: str, order_number: str, tracking_numbe
     _bg_send(to=to_email, subject=subject, html=_wrap(inner))
 
 
+def payment_requested(*, to_email: str, name: str, order_number: str, amount: float, stage: str):
+    subject = f"Payment requested — {order_number}"
+    dash_url = _app_url("/dashboard/orders")
+    label = "advance payment before work starts" if stage == "BEFORE_WORK" else "final payment after work completion"
+    inner = (
+        f'<p>Hi {escape(name or "there")}</p>'
+        f'<p>ZEROAXIS has requested your {escape(label)} for order <b>{escape(order_number)}</b>.</p>'
+        f'<p><b>Amount due:</b> ₹{amount:,.2f}</p>'
+        f'<p>You can now submit payment from your dashboard. Your payment will be marked complete only after verification.</p>'
+        f'{_button(dash_url, "Open your dashboard") if dash_url else ""}'
+    )
+    _bg_send(to=to_email, subject=subject, html=_wrap(inner))
+
+
 def payment_submitted(*, to_email: str, name: str, order_number: str, amount: float, reference: str):
     subject = f"Payment submitted — {order_number}"
     inner = (
