@@ -24,6 +24,7 @@ from routes.files import router as files_router
 from routes.messages import router as messages_router
 from routes.reports import router as reports_router
 from routes.support import router as support_router
+from routes.coupons import router as coupons_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("zeroaxis")
@@ -59,6 +60,7 @@ app.include_router(files_router)
 app.include_router(messages_router)
 app.include_router(reports_router)
 app.include_router(support_router)
+app.include_router(coupons_router)
 
 
 @app.get("/api/")
