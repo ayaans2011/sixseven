@@ -112,9 +112,8 @@ async def require_admin(user: dict = Depends(get_current_user)) -> dict:
 
 
 def get_request_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for", "")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    # Never trust X-Forwarded-For directly: clients can forge it unless a
+    # specifically configured trusted proxy has sanitized the header.
     return request.client.host if request.client else ""
 
 
