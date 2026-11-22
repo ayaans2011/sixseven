@@ -171,7 +171,7 @@ async def get_order(oid: str, user=Depends(get_current_user)):
             "verified_at": p.get("verified_at"),
             "provider": p.get("provider"), "proof_file_id": p.get("proof_file_id"),
             "proof_name": p.get("proof_name"), "rejection_reason": p.get("rejection_reason"),
-            "submitted_by": p.get("submitted_by"), "reference": p.get("reference"),
+            "submitted_by": p.get("submitted_by"),
             "review_note": p.get("review_note"),
         } for p in payments],
     }
