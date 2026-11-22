@@ -4,7 +4,7 @@ import api, { formatApiErrorDetail } from "@/lib/api";
 import Header from "@/components/Header";
 import { useAuth } from "@/lib/auth";
 import { toast } from "sonner";
-import { LayoutDashboard, Users, FileText, ShoppingBag, CreditCard, Server, Bell, ClipboardList, Settings, Download, Upload, Paperclip, Trash2, Search, BarChart3, ArrowRightCircle, MessageCircle } from "lucide-react";
+import { LayoutDashboard, Users, FileText, ShoppingBag, CreditCard, Server, Bell, ClipboardList, Settings, Download, Upload, Paperclip, Trash2, Search, BarChart3, ArrowRightCircle, MessageCircle, Tag } from "lucide-react";
 import MessagesThread from "@/components/MessagesThread";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -942,6 +942,35 @@ function Reports() {
   );
 }
 
+function CouponsAdmin() {
+  const empty={code:"",description:"",discount_type:"PERCENT",discount_value:"10",max_discount:"",min_order:"0",starts_at:"",ends_at:"",usage_limit:"",customer_ids:""};
+  const [form,setForm]=useState(empty),[items,setItems]=useState([]),[busy,setBusy]=useState(false);
+  const load=()=>api.get("/coupons").then(r=>setItems(r.data)).catch(e=>toast.error(formatApiErrorDetail(e.response?.data?.detail)));
+  useEffect(()=>{load();},[]);
+  const save=async e=>{e.preventDefault();setBusy(true);try{await api.post("/coupons",{...form,discount_value:Number(form.discount_value),max_discount:form.max_discount===""?null:Number(form.max_discount),min_order:Number(form.min_order),usage_limit:form.usage_limit===""?null:Number(form.usage_limit),customer_ids:form.customer_ids.split(",").map(x=>x.trim()).filter(Boolean)});toast.success("Coupon created");setForm(empty);load();}catch(e){toast.error(formatApiErrorDetail(e.response?.data?.detail));}finally{setBusy(false);}};
+  const toggle=async c=>{try{await api.put("/coupons/"+c.id,{active:!c.active});load();}catch(e){toast.error(formatApiErrorDetail(e.response?.data?.detail));}};
+  const remove=async c=>{if(!confirm("Delete or archive "+c.code+"?"))return;try{await api.delete("/coupons/"+c.id);toast.success("Coupon removed or archived");load();}catch(e){toast.error(formatApiErrorDetail(e.response?.data?.detail));}};
+  return <div><h2 className="font-serif text-2xl font-bold text-[#0A1128]">Coupons & Offers</h2>
+    <form onSubmit={save} className="zx-card mt-4 grid grid-cols-1 md:grid-cols-3 gap-3" data-testid="coupon-create-form">
+      <div><label className="zx-label">Coupon code</label><input className="zx-input" required maxLength={32} value={form.code} onChange={e=>setForm({...form,code:e.target.value.toUpperCase()})} placeholder="WELCOME10"/></div>
+      <div><label className="zx-label">Discount type</label><select className="zx-input" value={form.discount_type} onChange={e=>setForm({...form,discount_type:e.target.value})}><option value="PERCENT">Percentage</option><option value="FIXED">Fixed ₹</option></select></div>
+      <div><label className="zx-label">Discount value</label><input className="zx-input" type="number" min="0.01" step="0.01" required value={form.discount_value} onChange={e=>setForm({...form,discount_value:e.target.value})}/></div>
+      <div><label className="zx-label">Maximum discount ₹ (optional)</label><input className="zx-input" type="number" min="0.01" value={form.max_discount} onChange={e=>setForm({...form,max_discount:e.target.value})}/></div>
+      <div><label className="zx-label">Minimum order ₹</label><input className="zx-input" type="number" min="0" value={form.min_order} onChange={e=>setForm({...form,min_order:e.target.value})}/></div>
+      <div><label className="zx-label">Usage limit (optional)</label><input className="zx-input" type="number" min="1" value={form.usage_limit} onChange={e=>setForm({...form,usage_limit:e.target.value})}/></div>
+      <div><label className="zx-label">Starts at (ISO date/time)</label><input className="zx-input" placeholder="Optional" value={form.starts_at} onChange={e=>setForm({...form,starts_at:e.target.value})}/></div>
+      <div><label className="zx-label">Ends at (ISO date/time)</label><input className="zx-input" placeholder="Optional" value={form.ends_at} onChange={e=>setForm({...form,ends_at:e.target.value})}/></div>
+      <div><label className="zx-label">Customer IDs (comma-separated)</label><input className="zx-input" placeholder="Blank = all customers" value={form.customer_ids} onChange={e=>setForm({...form,customer_ids:e.target.value})}/></div>
+      <div className="md:col-span-3"><label className="zx-label">Offer description</label><input className="zx-input" maxLength={240} value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></div>
+      <div className="md:col-span-3"><button className="zx-btn-primary" disabled={busy}>{busy?"Creating…":"Create coupon"}</button></div>
+    </form>
+    <div className="overflow-x-auto mt-5"><table className="zx-table"><thead><tr><th>Code</th><th>Discount</th><th>Usage</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+      {items.map(c=><tr key={c.id}><td className="font-semibold">{c.code}<div className="text-xs text-[#6B7280]">{c.description}</div></td><td>{c.discount_type==="PERCENT"?c.discount_value+"%":"₹"+c.discount_value}{c.max_discount?" · max ₹"+c.max_discount:""}<div className="text-xs text-[#6B7280]">Min ₹{c.min_order||0}</div></td><td>{c.used_count||0}{c.usage_limit?" / "+c.usage_limit:""}</td><td>{c.active?"Active":"Paused"}</td><td><button className="zx-link text-sm mr-2" onClick={()=>toggle(c)}>{c.active?"Pause":"Activate"}</button><button className="zx-link text-sm" onClick={()=>remove(c)}>Delete</button></td></tr>)}
+      {items.length===0&&<tr><td colSpan="5" className="text-center py-6 text-[#6B7280]">No coupons yet.</td></tr>}
+    </tbody></table></div>
+  </div>;
+}
+
 export default function AdminDashboard() {
   const { user, logout } = useAuth();
   const links = [
@@ -951,6 +980,7 @@ export default function AdminDashboard() {
     { to: "/admin/support", label: "Support Tickets", icon: MessageCircle },
     { to: "/admin/orders", label: "Orders", icon: ShoppingBag },
     { to: "/admin/payments", label: "Payments", icon: CreditCard },
+    { to: "/admin/coupons", label: "Coupons & Offers", icon: Tag },
     { to: "/admin/services", label: "Services", icon: Server },
     { to: "/admin/notifications", label: "Notifications", icon: Bell },
     { to: "/admin/content", label: "Website Content", icon: Settings },
@@ -988,6 +1018,7 @@ export default function AdminDashboard() {
             <Route path="support" element={<SupportTicketsAdmin />} />
             <Route path="orders" element={<Orders />} />
             <Route path="payments" element={<Payments />} />
+            <Route path="coupons" element={<CouponsAdmin />} />
             <Route path="services" element={<ServicesAdmin />} />
             <Route path="notifications" element={<AdminNotifs />} />
             <Route path="content" element={<Content />} />

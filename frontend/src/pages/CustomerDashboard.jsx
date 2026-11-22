@@ -220,6 +220,9 @@ function NewOrder({ onCreated }) {
 
 function PaymentForm({ orderId, amount, onDone }) {
   const [payment, setPayment] = useState(null);
+  const [couponCode, setCouponCode] = useState("");
+  const [couponBusy, setCouponBusy] = useState(false);
+  const [couponResult, setCouponResult] = useState(null);
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
   const [visible, setVisible] = useState(true);
@@ -239,6 +242,14 @@ function PaymentForm({ orderId, amount, onDone }) {
       if (data.status === "success") onDoneRef.current?.();
     }).catch(() => {});
   }, [orderId]);
+
+  const applyCoupon = async () => {
+    if (!couponCode.trim()) return toast.error("Enter a coupon code");
+    setCouponBusy(true);
+    try { const {data} = await api.post("/coupons/apply", {order_id:orderId, code:couponCode}); setCouponResult(data); toast.success("Coupon applied"); }
+    catch(e){ toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
+    finally { setCouponBusy(false); }
+  };
 
   const createCheckout = async () => {
     setBusy(true);
@@ -305,9 +316,11 @@ function PaymentForm({ orderId, amount, onDone }) {
               <div className="text-xs text-[#6B7280]">Total amount</div>
               <div className="mt-1 text-sm font-semibold text-[#0A1128]">Order payment</div>
             </div>
-            <div className="font-serif text-2xl font-bold text-[#0A1128]">₹{Number(payment?.payable_amount || amount).toLocaleString("en-IN")}</div>
+            <div className="font-serif text-2xl font-bold text-[#0A1128]">₹{Number(payment?.payable_amount || couponResult?.payable_amount || amount).toLocaleString("en-IN")}</div>
           </div>
 
+          {!payment && !couponResult && <div className="rounded-xl border border-[#DCE3EC] p-3 space-y-2"><label className="text-sm font-semibold text-[#0A1128]">Have a coupon code?</label><div className="flex gap-2"><input className="zx-input min-w-0" placeholder="Enter coupon code" value={couponCode} onChange={e=>setCouponCode(e.target.value.toUpperCase())} maxLength={32}/><button type="button" className="zx-btn-outline shrink-0" disabled={couponBusy} onClick={applyCoupon}>{couponBusy?"Applying…":"Apply"}</button></div></div>}
+          {couponResult && <div className="rounded-xl border border-[#B7D8C2] bg-[#F3FAF5] p-3 text-sm"><b>Coupon {couponResult.coupon_code} applied</b><div className="flex justify-between"><span>Original</span><span>₹{Number(couponResult.base_amount).toLocaleString("en-IN")}</span></div><div className="flex justify-between"><span>Discount</span><span>−₹{Number(couponResult.discount_amount).toLocaleString("en-IN")}</span></div><div className="flex justify-between font-semibold border-t mt-1 pt-1"><span>Payable</span><span>₹{Number(couponResult.payable_amount).toLocaleString("en-IN")}</span></div></div>}
           {!payment ? (
             <div className="space-y-3">
               <div className="text-sm font-semibold text-[#0A1128]">UPI payment options</div>

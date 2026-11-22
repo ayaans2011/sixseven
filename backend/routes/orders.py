@@ -34,6 +34,7 @@ def _serialize(o: dict) -> dict:
         "service_id": o.get("service_id"),
         "service_name": o.get("service_name"),
         "amount": o.get("amount", 0),
+        "discount_amount": o.get("discount_amount", 0), "payable_amount": o.get("payable_amount", o.get("amount", 0)), "coupon_code": o.get("coupon_code"),
         "requirement": o.get("requirement"),
         "notes": o.get("notes"),
         "payment_status": o.get("payment_status", "UNPAID"),
@@ -248,6 +249,10 @@ async def _mark_famgateway_paid(db, payment: dict, order: dict, gateway_data: di
             "sender_name": gateway_data.get("sender_name"),
             "payment_time": gateway_data.get("payment_time"),
             "verified_at": now, "verified_by": "FamGateway"}})
+        if order.get("coupon_id"):
+            redeemed = await db.orders.update_one({"_id": order["_id"], "coupon_redeemed": {"$ne": True}}, {"$set": {"coupon_redeemed": True}})
+            if redeemed.modified_count:
+                await db.coupons.update_one({"_id": ObjectId(order["coupon_id"])}, {"$inc": {"used_count": 1}})
         if order.get("customer_id"):
             await db.notifications.insert_one({"user_id": order["customer_id"], "title": "Payment verified",
                 "body": "Payment for order " + order["order_number"] + " has been confirmed.",
@@ -255,7 +260,7 @@ async def _mark_famgateway_paid(db, payment: dict, order: dict, gateway_data: di
         if order.get("customer_email"):
             email_svc.payment_verified(to_email=order["customer_email"],
                 name=order.get("customer_name", ""), order_number=order["order_number"],
-                amount=float(order.get("amount", 0)))
+                amount=float(order.get("payable_amount", order.get("amount", 0))))
         await audit_log("famgateway_payment_verified", "famgateway", "FamGateway", "order", oid, {"utr": utr})
 
 @router.post("/{oid}/payment/create")
@@ -271,7 +276,7 @@ async def create_famgateway_payment(oid: str, user=Depends(get_current_user)):
         raise HTTPException(status_code=400, detail="Order already paid")
     if not order.get("payment_requested"):
         raise HTTPException(status_code=403, detail="Payment has not been requested by the administrator yet")
-    amount = float(order.get("amount", 0))
+    amount = float(order.get("payable_amount", order.get("amount", 0)))
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Invalid order amount")
     now = datetime.now(timezone.utc).isoformat()
@@ -433,7 +438,7 @@ async def submit_manual_payment(oid: str, data: dict, user=Depends(get_current_u
         raise HTTPException(status_code=409, detail="Order payment status changed. Refresh and try again.")
     try:
         await db.payments.insert_one({"order_id": oid, "customer_id": user["id"], "provider": "manual",
-            "method": method, "reference": reference, "amount": float(order.get("amount", 0)),
+            "method": method, "reference": reference, "amount": float(order.get("payable_amount", order.get("amount", 0))),
             "status": "PENDING_VERIFICATION", "proof_file_id": proof_id,
             "proof_name": proof.get("original_name"), "submitted_by": user["email"], "created_at": now})
     except Exception:
@@ -447,9 +452,9 @@ async def submit_manual_payment(oid: str, data: dict, user=Depends(get_current_u
             "read": False, "created_at": now})
     if order.get("customer_email"):
         email_svc.payment_submitted(to_email=order["customer_email"], name=order.get("customer_name", ""),
-            order_number=order.get("order_number", ""), amount=float(order.get("amount", 0)), reference=reference)
+            order_number=order.get("order_number", ""), amount=float(order.get("payable_amount", order.get("amount", 0))), reference=reference)
     await audit_log("manual_payment_submitted", user["id"], user["email"], "order", oid,
-        {"method": method, "amount": float(order.get("amount", 0)), "payment_reference": reference})
+        {"method": method, "amount": float(order.get("payable_amount", order.get("amount", 0))), "payment_reference": reference})
     return {"success": True, "payment_status": "PENDING_VERIFICATION"}
 
 
@@ -484,6 +489,10 @@ async def review_manual_payment(oid: str, data: dict, admin=Depends(require_admi
     new_status = "PAYMENT_VERIFIED" if decision == "APPROVE" else "PAYMENT_REJECTED"
     await db.orders.update_one({"_id": order["_id"], "payment_status": {"$ne": "PAYMENT_VERIFIED"}},
         {"$set": {"payment_status": new_status, "payment_requested": False, "updated_at": now}})
+    if decision == "APPROVE" and order.get("coupon_id"):
+        redeemed = await db.orders.update_one({"_id": order["_id"], "coupon_redeemed": {"$ne": True}}, {"$set": {"coupon_redeemed": True}})
+        if redeemed.modified_count:
+            await db.coupons.update_one({"_id": ObjectId(order["coupon_id"])}, {"$inc": {"used_count": 1}})
     title = "Payment verified" if decision == "APPROVE" else "Payment proof rejected"
     body = "Payment for order " + order.get("order_number", "") + (" has been verified." if decision == "APPROVE" else " was rejected. Reason: " + note)
     if order.get("customer_id"):
@@ -581,7 +590,7 @@ async def request_order_payment(oid: str, admin=Depends(require_admin)):
             "read": False, "created_at": now})
     if order.get("customer_email"):
         email_svc.payment_requested(to_email=order["customer_email"], name=order.get("customer_name", ""),
-            order_number=order.get("order_number", ""), amount=float(order.get("amount", 0)), stage=stage)
+            order_number=order.get("order_number", ""), amount=float(order.get("payable_amount", order.get("amount", 0))), stage=stage)
     await audit_log("order_payment_requested", admin["id"], admin["email"], "order", oid, {"stage": stage})
     return {"success": True, "payment_due_stage": stage, "payment_requested": True}
 
