@@ -245,6 +245,9 @@ async def delete_file(fid: str, user=Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Not found")
     if not f:
         raise HTTPException(status_code=404, detail="Not found")
+    linked_proof = await get_db().payments.find_one({"proof_file_id": fid})
+    if linked_proof:
+        raise HTTPException(status_code=409, detail="Payment evidence is retained as part of the financial record")
     if user["role"] != "admin" and f.get("owner_id") != user["id"]:
         raise HTTPException(status_code=403, detail="Forbidden")
     await db.files.update_one({"_id": f["_id"]}, {"$set": {"is_deleted": True}})
