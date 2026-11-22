@@ -425,6 +425,32 @@ function Orders() {
     try { await api.post(`/orders/${sel.id}/status`, { order_status: newStatus, note }); toast.success("Status updated"); open(sel.id); load(); }
     catch(e){ toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
   };
+  const reviewManualPayment = async (payment, decision) => {
+    let reason = "";
+    if (decision === "REJECT") {
+      reason = window.prompt("Enter the reason for rejecting this proof:") || "";
+      if (!reason.trim()) return;
+    } else {
+      reason = window.prompt("Optional verification note:") || "";
+    }
+    try {
+      await api.post("/orders/" + sel.id + "/payment/manual-review", {
+        payment_id: payment.id, decision, note: reason,
+      });
+      toast.success(decision === "APPROVE" ? "Payment verified" : "Payment proof rejected");
+      await open(sel.id);
+      load();
+    } catch(e) { toast.error(formatApiErrorDetail(e.response?.data?.detail)); }
+  };
+  const downloadPaymentProof = async (fileId, name) => {
+    try {
+      const resp = await api.get("/files/" + fileId + "/download", { responseType: "blob" });
+      const url = URL.createObjectURL(resp.data);
+      const link = document.createElement("a"); link.href = url; link.download = name || "payment-proof";
+      document.body.appendChild(link); link.click(); link.remove();
+      setTimeout(()=>URL.revokeObjectURL(url), 2000);
+    } catch(e) { toast.error("Could not download payment proof"); }
+  };
   const downloadInvoice = async () => {
     try {
       const resp = await api.get(`/orders/${sel.id}/invoice.pdf`, { responseType: "blob" });
@@ -517,6 +543,29 @@ function Orders() {
               <button className="zx-btn-primary mt-3" onClick={downloadInvoice} data-testid={`admin-invoice-${sel.order_number}`}>
                 <Download size={14}/> Download Invoice
               </button>
+            )}
+
+            {(sel.payments || []).filter(p=>p.provider==="manual").length > 0 && (
+              <section className="zx-card mt-4 space-y-3" data-testid="manual-payment-review">
+                <div className="font-semibold text-sm">Offline payment submissions</div>
+                {(sel.payments || []).filter(p=>p.provider==="manual").map(p=>(
+                  <div key={p.id} className="border border-[#DCE3EC] rounded-lg p-3 text-sm">
+                    <div className="flex flex-wrap justify-between gap-2">
+                      <b>{String(p.method || "manual").replace(/_/g," ")} · ₹{Number(p.amount || 0).toLocaleString("en-IN")}</b>
+                      <StatusBadge status={p.status} />
+                    </div>
+                    <div className="text-xs text-[#6B7280] mt-1">Reference: {p.reference || "Not supplied"} · Submitted: {p.created_at ? new Date(p.created_at).toLocaleString() : "—"}</div>
+                    <div className="text-xs text-[#6B7280]">Submitted by: {p.submitted_by || "—"}</div>
+                    {p.proof_file_id && <button className="zx-link text-sm mt-2" onClick={()=>downloadPaymentProof(p.proof_file_id, p.proof_name)}>Download payment proof</button>}
+                    {p.rejection_reason && <div className="text-xs text-[#A11B1B] mt-1">Rejection reason: {p.rejection_reason}</div>}
+                    {p.status === "PENDING_VERIFICATION" && <div className="flex flex-wrap gap-2 mt-3">
+                      <button className="zx-btn-primary" onClick={()=>reviewManualPayment(p,"APPROVE")}>Approve payment</button>
+                      <button className="zx-btn-outline" onClick={()=>reviewManualPayment(p,"REJECT")}>Reject proof</button>
+                    </div>}
+                    {p.verified_by && <div className="text-xs text-[#6B7280] mt-2">Reviewed by {p.verified_by} · {p.verified_at ? new Date(p.verified_at).toLocaleString() : ""}</div>}
+                  </div>
+                ))}
+              </section>
             )}
 
             <FileAttachments parentType="order" parentId={sel.id} />
