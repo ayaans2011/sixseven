@@ -240,8 +240,6 @@ async def _mark_famgateway_paid(db, payment: dict, order: dict, gateway_data: di
             "sender_name": gateway_data.get("sender_name"),
             "payment_time": gateway_data.get("payment_time"),
             "verified_at": now, "verified_by": "FamGateway"}})
-        await _add_status_history(db, oid, order.get("order_status", "CREATED"), "PAYMENT_VERIFIED",
-            "famgateway", "FamGateway", "Online payment verified. UTR: " + utr)
         if order.get("customer_id"):
             await db.notifications.insert_one({"user_id": order["customer_id"], "title": "Payment verified",
                 "body": "Payment for order " + order["order_number"] + " has been confirmed.",
@@ -342,7 +340,7 @@ async def check_famgateway_payment(oid: str, user=Depends(get_current_user)):
         await db.payments.update_one({"_id": payment["_id"], "status": "PAYMENT_PENDING"},
             {"$set": {"status": "EXPIRED", "updated_at": now}})
         await db.orders.update_one({"_id": order["_id"], "payment_status": "PAYMENT_PENDING"},
-            {"$set": {"payment_status": "UNPAID", "order_status": "CREATED", "updated_at": now}})
+            {"$set": {"payment_status": "UNPAID", "updated_at": now}})
         return {"status": "expired", "payment_status": "UNPAID"}
     return {"status": "pending", "payment_status": "PAYMENT_PENDING", "checkout": {
         "order_id": payment.get("provider_order_id"), "amount": payment.get("order_amount", payment.get("amount")), "payable_amount": payment.get("amount"),
