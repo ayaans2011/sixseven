@@ -209,7 +209,11 @@ async def forgot_password(data: ForgotPasswordIn):
         otp = f"{secrets.randbelow(1000000):06d}"
         otp_hash = _otp_digest(otp)
         await db.password_reset_tokens.update_one({"token_hash": token_hash}, {"$set": {"otp_hash": otp_hash, "otp_used": False, "otp_attempts": 0}})
-        password_reset(to_email=email, name=user.get("name", ""), reset_token=token, otp=otp)
+        delivered = await send_password_reset(to_email=email, name=user.get("name", ""), reset_token=token, otp=otp)
+        if not delivered:
+            await db.password_reset_tokens.update_one(
+                {"token_hash": token_hash, "used": False}, {"$set": {"used": True}}
+            )
     return {"message": "If the email exists, a password reset link has been sent."}
 
 
