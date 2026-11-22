@@ -274,7 +274,11 @@ async def convert_to_order(eid: str, admin=Depends(require_admin), service_id: s
         "requirement": e.get("requirement", ""),
         "notes": f"Converted from enquiry {e.get('enquiry_number','')}",
         "payment_status": "UNPAID",
-        "order_status": "CREATED",
+        "order_status": "ORDER_RECEIVED",
+        "assigned_developer": None,
+        "payment_timing": None,
+        "payment_requested": False,
+        "payment_due_stage": None,
         "converted_from_enquiry_id": eid,
         "created_at": now,
         "updated_at": now,
@@ -285,7 +289,7 @@ async def convert_to_order(eid: str, admin=Depends(require_admin), service_id: s
     await db.order_status_history.insert_one({
         "order_id": order_id,
         "from_status": "",
-        "to_status": "CREATED",
+        "to_status": "ORDER_RECEIVED",
         "actor_id": admin["id"],
         "actor_email": admin["email"],
         "note": f"Converted from enquiry {e.get('enquiry_number','')}",
@@ -301,7 +305,7 @@ async def convert_to_order(eid: str, admin=Depends(require_admin), service_id: s
     await db.notifications.insert_one({
         "user_id": customer_id,
         "title": "Order created from your enquiry",
-        "body": f"We've turned your enquiry {e.get('enquiry_number','')} into order {order_number}. Please complete payment to proceed.",
+        "body": f"We've turned your enquiry {e.get('enquiry_number','')} into order {order_number}. Our team will assign a developer and notify you when payment is due.",
         "read": False,
         "created_at": now,
     })
