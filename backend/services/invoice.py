@@ -112,6 +112,8 @@ def generate_invoice_pdf(*, order: dict, customer: dict, content: dict) -> bytes
     c.setStrokeColor(LINE)
     c.setLineWidth(0.5)
     amount = float(order.get("amount", 0) or 0)
+    discount = float(order.get("discount_amount", 0) or 0)
+    payable = float(order.get("payable_amount", amount) or 0)
     c.setFillColor(NAVY)
     c.setFont("Helvetica-Bold", 10.5)
     c.drawString(20 * mm, ty, order.get("service_name", "Service"))
@@ -141,6 +143,12 @@ def generate_invoice_pdf(*, order: dict, customer: dict, content: dict) -> bytes
     c.setFillColor(NAVY)
     c.drawRightString(W - 20 * mm, ty, f"₹{amount:,.2f}")
 
+    if discount > 0:
+        ty -= 6 * mm
+        c.setFillColor(MUTED)
+        c.drawRightString(W - 40 * mm, ty, "Coupon discount (" + str(order.get("coupon_code", "")) + ")")
+        c.setFillColor(ACCENT)
+        c.drawRightString(W - 20 * mm, ty, f"-₹{discount:,.2f}")
     ty -= 6 * mm
     c.setFillColor(MUTED)
     c.drawRightString(W - 40 * mm, ty, "Tax")
@@ -155,7 +163,7 @@ def generate_invoice_pdf(*, order: dict, customer: dict, content: dict) -> bytes
     c.setFont("Helvetica-Bold", 12)
     c.drawRightString(W - 40 * mm, ty - 3 * mm, "Total")
     c.setFillColor(ACCENT)
-    c.drawRightString(W - 20 * mm, ty - 3 * mm, f"₹{amount:,.2f}")
+    c.drawRightString(W - 20 * mm, ty - 3 * mm, f"₹{payable:,.2f}")
 
     # ---- Payment status ----
     ty -= 20 * mm
