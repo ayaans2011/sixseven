@@ -422,8 +422,6 @@ async def submit_manual_payment(oid: str, data: dict, user=Depends(get_current_u
         await db.orders.update_one({"_id": order["_id"], "payment_status": "PENDING_VERIFICATION"},
             {"$set": {"payment_status": order.get("payment_status", "UNPAID"), "updated_at": now}})
         raise
-    await _add_status_history(db, oid, order.get("order_status", "CREATED"), order.get("order_status", "CREATED"),
-        user["id"], user["email"], method.replace("_", " ").title() + " proof submitted for review")
     admins = await db.users.find({"role": "admin", "disabled": {"$ne": True}}, {"_id": 1}).to_list(1000)
     for admin_user in admins:
         await db.notifications.insert_one({"user_id": str(admin_user["_id"]), "title": "Payment proof submitted",
@@ -465,8 +463,6 @@ async def review_manual_payment(oid: str, data: dict, admin=Depends(require_admi
     new_status = "PAYMENT_VERIFIED" if decision == "APPROVE" else "PAYMENT_REJECTED"
     await db.orders.update_one({"_id": order["_id"], "payment_status": {"$ne": "PAYMENT_VERIFIED"}},
         {"$set": {"payment_status": new_status, "updated_at": now}})
-    await _add_status_history(db, oid, order.get("order_status", "CREATED"), order.get("order_status", "CREATED"),
-        admin["id"], admin["email"], "Manual payment " + ("verified" if decision == "APPROVE" else "rejected") + ": " + note)
     title = "Payment verified" if decision == "APPROVE" else "Payment proof rejected"
     body = "Payment for order " + order.get("order_number", "") + (" has been verified." if decision == "APPROVE" else " was rejected. Reason: " + note)
     if order.get("customer_id"):
