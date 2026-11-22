@@ -83,7 +83,7 @@ function StatusBadge({ status }) {
   const map = {
     UNPAID: "gray", PAYMENT_SUBMITTED: "amber", PENDING_VERIFICATION: "amber", PAYMENT_PENDING: "amber",
     PAYMENT_VERIFIED: "green", PAYMENT_REJECTED: "red", REFUNDED: "gray",
-    CREATED: "blue", WORK_STARTED: "blue", IN_PROGRESS: "blue",
+    CREATED: "blue", ORDER_RECEIVED: "amber", DEVELOPER_ASSIGNED: "blue", WORK_STARTED: "blue", IN_PROGRESS: "blue",
     READY_FOR_DELIVERY: "amber", COMPLETED: "green", CANCELLED: "red",
     new: "blue", responded: "green", closed: "gray", converted: "green",
   };
