@@ -44,7 +44,7 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
         working-directory: frontend
-      - name: Audit frontend dependencies (report-only until legacy dependency tree is upgraded)
+      - name: Audit all frontend dependencies (blocking)
         run: npm audit --audit-level=high
         working-directory: frontend
       - name: Build frontend
