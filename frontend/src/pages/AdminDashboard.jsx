@@ -388,7 +388,7 @@ function Enquiries() {
   );
 }
 
-const ORDER_STATUSES = ["CREATED","ORDER_RECEIVED","DEVELOPER_ASSIGNED","PAYMENT_PENDING","PAYMENT_SUBMITTED","PENDING_VERIFICATION","PAYMENT_VERIFIED","WORK_STARTED","IN_PROGRESS","READY_FOR_DELIVERY","COMPLETED","CANCELLED"];
+const ORDER_STATUSES = ["CREATED","ORDER_RECEIVED","DEVELOPER_ASSIGNED","WORK_STARTED","IN_PROGRESS","READY_FOR_DELIVERY","COMPLETED","CANCELLED"];
 const EDITABLE_ORDER_STATUSES = ["CREATED","ORDER_RECEIVED","DEVELOPER_ASSIGNED","WORK_STARTED","IN_PROGRESS","READY_FOR_DELIVERY","COMPLETED","CANCELLED"];
 
 function Orders() {
@@ -502,7 +502,7 @@ function Orders() {
         </select>
         <select className="zx-input" value={filters.payment_status} onChange={e=>setFilters({...filters, payment_status: e.target.value})} data-testid="admin-filter-payment">
           <option value="">Any payment</option>
-          {["UNPAID","PENDING_VERIFICATION","PAYMENT_VERIFIED","PAYMENT_REJECTED","REFUNDED"].map(s=><option key={s} value={s}>{s.replace(/_/g,' ')}</option>)}
+          {["UNPAID","PAYMENT_PENDING","PENDING_VERIFICATION","PAYMENT_VERIFIED","PAYMENT_REJECTED","REFUNDED"].map(s=><option key={s} value={s}>{s.replace(/_/g,' ')}</option>)}
         </select>
         <input type="date" className="zx-input" value={filters.date_from} onChange={e=>setFilters({...filters, date_from: e.target.value})} data-testid="admin-filter-from" />
         <input type="date" className="zx-input" value={filters.date_to} onChange={e=>setFilters({...filters, date_to: e.target.value})} data-testid="admin-filter-to" />
@@ -536,8 +536,8 @@ function Orders() {
               </div>
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
-              <StatusBadge status={o.payment_status} />
-              <StatusBadge status={o.order_status} />
+              <span className="text-xs text-[#6B7280] self-center">Payment</span><StatusBadge status={o.payment_status} />
+              <span className="text-xs text-[#6B7280] self-center">Order</span><StatusBadge status={o.order_status} />
             </div>
             <div className="mt-3 flex justify-end border-t border-[#E5E7EB] pt-3">
               <button className="zx-btn-outline text-sm" onClick={()=>open(o.id)} data-testid={`admin-open-order-${o.order_number}`}>Open order record</button>
@@ -557,8 +557,8 @@ function Orders() {
               <button onClick={()=>setSel(null)}>✕</button>
             </div>
             <div className="mt-2 flex gap-2 flex-wrap">
-              <StatusBadge status={sel.order_status} />
-              <span className="zx-badge zx-badge-gray">Payment: {sel.payment_status}</span>
+              <span className="text-xs text-[#6B7280] self-center">Order</span><StatusBadge status={sel.order_status} />
+              <span className="text-xs text-[#6B7280] self-center">Payment</span><StatusBadge status={sel.payment_status} />
             </div>
             <div className="text-sm mt-2"><b>Amount:</b> ₹{Number(sel.amount).toLocaleString('en-IN')}</div>
             <div className="text-sm"><b>Requirement:</b> {sel.requirement}</div>
