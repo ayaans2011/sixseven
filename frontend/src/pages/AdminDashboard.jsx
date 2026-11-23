@@ -4,7 +4,7 @@ import api, { formatApiErrorDetail } from "@/lib/api";
 import Header from "@/components/Header";
 import { useAuth } from "@/lib/auth";
 import { toast } from "sonner";
-import { LayoutDashboard, Users, FileText, ShoppingBag, CreditCard, Server, Bell, ClipboardList, Settings, Download, Upload, Paperclip, Trash2, Search, BarChart3, ArrowRightCircle, MessageCircle, Tag } from "lucide-react";
+import { LayoutDashboard, Users, FileText, ShoppingBag, CreditCard, Server, Bell, ClipboardList, Settings, Download, Upload, Paperclip, Trash2, Search, BarChart3, ArrowRightCircle, MessageCircle, Tag, AlertTriangle } from "lucide-react";
 import MessagesThread from "@/components/MessagesThread";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
