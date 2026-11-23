@@ -922,6 +922,57 @@ function ProductionDataReset() {
   </div>;
 }
 
+
+function ProductionDataReset() {
+  const [password,setPassword]=useState("");
+  const [otp,setOtp]=useState("");
+  const [challenge,setChallenge]=useState("");
+  const [confirmation,setConfirmation]=useState("");
+  const [busy,setBusy]=useState(false);
+  const [requested,setRequested]=useState(false);
+  const [result,setResult]=useState(null);
+  const requestCode=async()=>{
+    setBusy(true);
+    try {
+      const {data}=await api.post("/admin/maintenance/data-reset/request-otp",{admin_password:password});
+      setChallenge(data.challenge); setRequested(true); toast.success("Confirmation code sent to admin email");
+    } catch(e){toast.error(formatApiErrorDetail(e.response?.data?.detail));}
+    finally{setBusy(false);}
+  };
+  const runReset=async(e)=>{
+    e.preventDefault();
+    if(!window.confirm("Customer accounts and active business records will be removed after archival. Continue?")) return;
+    setBusy(true);
+    try {
+      const {data}=await api.post("/admin/maintenance/data-reset",{
+        admin_password:password,email_otp:otp,otp_challenge:challenge,confirmation
+      });
+      setResult(data); toast.success("Reset completed; archives and audit evidence preserved.");
+    } catch(e){toast.error(formatApiErrorDetail(e.response?.data?.detail));}
+    finally{setBusy(false);}
+  };
+  return <div className="max-w-2xl">
+    <h2 className="font-serif text-2xl font-bold text-[#A11B1B]">Production data reset</h2>
+    <p className="text-sm text-[#4B5563] mt-2">Clears customer accounts and active orders, payments, enquiries, support tickets, attachments, messages and notifications after archiving them. Admin accounts, website content, services, coupons and audit logs remain.</p>
+    <div className="zx-card mt-4 space-y-3">
+      <div className="text-sm font-semibold">Important</div>
+      <p className="text-sm text-[#6B7280]">Make a database-provider backup before use. Archived customer and payment information remains in restricted archive collections for reconciliation and evidence retention.</p>
+      <label className="zx-label">Administrator password</label>
+      <input type="password" autoComplete="current-password" className="zx-input" value={password} onChange={e=>setPassword(e.target.value)} />
+      {!requested ? <button className="zx-btn-primary" disabled={busy||!password} onClick={requestCode}>{busy?"Requesting…":"Send confirmation code"}</button> : (
+        <form onSubmit={runReset} className="space-y-3">
+          <label className="zx-label">Six-digit email code</label>
+          <input inputMode="numeric" maxLength={6} className="zx-input" value={otp} onChange={e=>setOtp(e.target.value.replace(/\D/g,""))} />
+          <label className="zx-label">Type exactly: RESET ZEROAXIS PRODUCTION DATA</label>
+          <input className="zx-input" value={confirmation} onChange={e=>setConfirmation(e.target.value)} />
+          <button className="zx-btn-primary bg-[#A11B1B]" disabled={busy||otp.length!==6||confirmation!=="RESET ZEROAXIS PRODUCTION DATA"}>{busy?"Resetting…":"Permanently reset production data"}</button>
+        </form>
+      )}
+      {result && <div className="border border-[#CBD5E1] rounded-lg p-3 text-sm"><b>Reset completed</b><div>Archived customers: {result.archived_customers}</div><div>Archives: {result.archived_collections?.join(", ")}</div><div>Audit logs preserved: Yes</div></div>}
+    </div>
+  </div>;
+}
+
 function Reports() {
   const [data, setData] = useState(null);
   const [days, setDays] = useState(30);
@@ -1039,6 +1090,7 @@ export default function AdminDashboard() {
     { to: "/admin/reports", label: "Reports", icon: BarChart3 },
     { to: "/admin/audit", label: "Audit Logs", icon: ClipboardList },
     { to: "/admin/maintenance/reset", label: "Data Reset", icon: AlertTriangle },
+    { to: "/admin/maintenance/reset", label: "Data Reset", icon: AlertTriangle },
   ];
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-[#F8F9FA]">
@@ -1077,6 +1129,7 @@ export default function AdminDashboard() {
             <Route path="content" element={<Content />} />
             <Route path="reports" element={<Reports />} />
             <Route path="audit" element={<AuditLogs />} />
+            <Route path="maintenance/reset" element={<ProductionDataReset />} />
             <Route path="maintenance/reset" element={<ProductionDataReset />} />
           </Routes>
         </div>
