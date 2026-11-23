@@ -365,7 +365,7 @@ async def check_famgateway_payment(oid: str, user=Depends(get_current_user)):
     if status == "success" or gateway.get("is_paid") is True:
         if not _amount_matches(gateway.get("payable_amount", gateway.get("amount", payment["amount"])), payment["amount"]):
             raise HTTPException(status_code=409, detail="Verified payment amount mismatch")
-        await _mark_famgateway_paid(db, payment, order, gateway)
+        await _mark_famgateway_paid(db, payment, order, gateway, response.get("status"))
         return {"status": "success", "payment_status": "PAYMENT_VERIFIED"}
     if status == "expired" or gateway.get("is_expired") is True:
         now = datetime.now(timezone.utc).isoformat()
@@ -414,7 +414,7 @@ async def famgateway_webhook(request: Request):
         raise HTTPException(status_code=409, detail="Provider has not confirmed this payment")
     if not _amount_matches(confirmed.get("payable_amount", confirmed.get("amount")), payment["amount"]):
         raise HTTPException(status_code=409, detail="Verified payment amount mismatch")
-    await _mark_famgateway_paid(db, payment, order, confirmed)
+    await _mark_famgateway_paid(db, payment, order, confirmed, confirmed_response.get("status"))
     return {"status": "received"}
 
 
