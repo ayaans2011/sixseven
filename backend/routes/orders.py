@@ -230,7 +230,26 @@ def _amount_matches(actual, expected) -> bool:
     except (TypeError, ValueError):
         return False
 
-async def _mark_famgateway_paid(db, payment: dict, order: dict, gateway_data: dict):
+def _assert_famgateway_confirmation(payment: dict, gateway_data: dict, response_status=None):
+    """Fail closed unless the provider independently confirms a paid transaction."""
+    status = str(gateway_data.get("status") or response_status or "").strip().lower()
+    if status != "success" and gateway_data.get("is_paid") is not True:
+        raise HTTPException(status_code=409, detail="Payment provider has not confirmed a successful payment")
+    # Never substitute our own stored amount when the provider omits its amount.
+    confirmed_amount = gateway_data.get("payable_amount")
+    if confirmed_amount is None:
+        confirmed_amount = gateway_data.get("amount")
+    if confirmed_amount is None or not _amount_matches(confirmed_amount, payment.get("amount")):
+        raise HTTPException(status_code=409, detail="Provider payment amount is missing or does not match")
+    if not str(gateway_data.get("utr") or "").strip():
+        raise HTTPException(status_code=409, detail="Provider confirmation is missing the transaction UTR")
+
+
+async def _mark_famgateway_paid(db, payment: dict, order: dict, gateway_data: dict, response_status=None):
+    if payment.get("provider") != "famgateway" or payment.get("order_id") != str(order["_id"]):
+        raise HTTPException(status_code=409, detail="Payment session does not match this order")
+    _assert_famgateway_confirmation(payment, gateway_data, response_status)
+
     now = datetime.now(timezone.utc).isoformat()
     oid = str(order["_id"])
     utr = str(gateway_data.get("utr") or "").strip()
