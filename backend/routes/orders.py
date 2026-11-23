@@ -23,6 +23,33 @@ from services.invoice import generate_invoice_pdf
 router = APIRouter(prefix="/api/orders", tags=["orders"])
 
 
+async def _restore_legacy_payment_order_status(db, order: dict, payment: dict | None = None):
+    """Repair old records where PAYMENT_PENDING was incorrectly written to order_status."""
+    if not order or order.get("order_status") != "PAYMENT_PENDING":
+        return order
+    oid = str(order["_id"])
+    if payment is None:
+        payment = await db.payments.find_one(
+            {"order_id": oid, "provider": "famgateway"},
+            sort=[("created_at", -1)])
+    restored = payment.get("previous_order_status") if payment else None
+    allowed = {"ORDER_RECEIVED", "DEVELOPER_ASSIGNED", "WORK_STARTED", "IN_PROGRESS", "READY_FOR_DELIVERY", "COMPLETED"}
+    if restored not in allowed:
+        after_work = order.get("payment_due_stage") == "AFTER_WORK" or order.get("payment_timing") == "LAST"
+        restored = "READY_FOR_DELIVERY" if after_work else (
+            "DEVELOPER_ASSIGNED" if order.get("assigned_developer") else "ORDER_RECEIVED")
+    now = datetime.now(timezone.utc).isoformat()
+    result = await db.orders.update_one(
+        {"_id": order["_id"], "order_status": "PAYMENT_PENDING"},
+        {"$set": {"order_status": restored, "updated_at": now}})
+    if result.modified_count:
+        await _add_status_history(db, oid, "PAYMENT_PENDING", restored,
+            "system", "ZEROAXIS", "Repaired legacy order/payment status mismatch")
+        order["order_status"] = restored
+        order["updated_at"] = now
+    return order
+
+
 def _serialize(o: dict) -> dict:
     return {
         "id": str(o["_id"]),
@@ -115,6 +142,8 @@ async def create_order(data: OrderIn, user=Depends(get_current_user)):
 async def my_orders(user=Depends(get_current_user)):
     db = get_db()
     items = await db.orders.find({"customer_id": user["id"]}).sort("created_at", -1).to_list(500)
+    for item in items:
+        await _restore_legacy_payment_order_status(db, item)
     return [_serialize(o) for o in items]
 
 
@@ -129,6 +158,7 @@ async def track_public(tracking_number: str, email: EmailStr = Query(...)):
     })
     if not o:
         raise HTTPException(status_code=404, detail="Order not found")
+    await _restore_legacy_payment_order_status(db, o)
     history = await db.order_status_history.find({"order_id": str(o["_id"])}).sort("timestamp", 1).to_list(200)
     return {
         "tracking_number": o["tracking_number"],
@@ -157,6 +187,7 @@ async def get_order(oid: str, user=Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Not found")
     if user["role"] != "admin" and o.get("customer_id") != user["id"]:
         raise HTTPException(status_code=403, detail="Forbidden")
+    await _restore_legacy_payment_order_status(db, o)
     history = await db.order_status_history.find({"order_id": oid}).sort("timestamp", 1).to_list(200)
     payments = await db.payments.find({"order_id": oid}).sort("created_at", -1).to_list(50)
     return {
@@ -258,10 +289,20 @@ async def _mark_famgateway_paid(db, payment: dict, order: dict, gateway_data: di
     duplicate = await db.payments.find_one({"provider": "famgateway", "utr": utr, "order_id": {"$ne": oid}})
     if duplicate:
         raise HTTPException(status_code=409, detail="Transaction reference already used")
+    restored_order_status = payment.get("previous_order_status")
+    if restored_order_status not in {"ORDER_RECEIVED", "DEVELOPER_ASSIGNED", "WORK_STARTED", "IN_PROGRESS", "READY_FOR_DELIVERY", "COMPLETED"}:
+        restored_order_status = "READY_FOR_DELIVERY" if order.get("payment_due_stage") == "AFTER_WORK" else (
+            "DEVELOPER_ASSIGNED" if order.get("assigned_developer") else "ORDER_RECEIVED")
+    order_update = {"payment_status": "PAYMENT_VERIFIED", "payment_requested": False, "updated_at": now}
+    if order.get("order_status") == "PAYMENT_PENDING":
+        order_update["order_status"] = restored_order_status
     changed = await db.orders.update_one(
         {"_id": order["_id"], "payment_status": {"$ne": "PAYMENT_VERIFIED"}},
-        {"$set": {"payment_status": "PAYMENT_VERIFIED", "payment_requested": False, "updated_at": now}})
+        {"$set": order_update})
     if changed.modified_count:
+        if order.get("order_status") == "PAYMENT_PENDING":
+            await _add_status_history(db, oid, "PAYMENT_PENDING", restored_order_status,
+                "system", "FamGateway", "Payment confirmed; restored order workflow status")
         await db.payments.update_one({"_id": payment["_id"]}, {"$set": {
             "status": "PAYMENT_VERIFIED", "utr": utr,
             "transaction_id": gateway_data.get("transaction_id"),
@@ -291,8 +332,13 @@ async def create_famgateway_payment(oid: str, user=Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Order not found")
     if not order or order.get("customer_id") != user["id"]:
         raise HTTPException(status_code=404, detail="Order not found")
+    await _restore_legacy_payment_order_status(db, order)
     if order.get("payment_status") == "PAYMENT_VERIFIED":
         raise HTTPException(status_code=400, detail="Order already paid")
+    if order.get("payment_status") == "PENDING_VERIFICATION":
+        raise HTTPException(status_code=409, detail="An offline payment proof is awaiting administrator review")
+    if order.get("payment_status") not in {"UNPAID", "PAYMENT_REJECTED", "PAYMENT_PENDING"}:
+        raise HTTPException(status_code=409, detail="Order is not in a payable state")
     if not order.get("payment_requested"):
         raise HTTPException(status_code=403, detail="Payment has not been requested by the administrator yet")
     amount = float(order.get("payable_amount", order.get("amount", 0)))
@@ -330,14 +376,14 @@ async def create_famgateway_payment(oid: str, user=Depends(get_current_user)):
     expires_at = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
     payment = {"order_id": oid, "customer_id": user["id"], "provider": "famgateway",
         "provider_order_id": provider_id, "method": "UPI", "amount": payable_amount, "order_amount": amount,
+        "previous_order_status": order.get("order_status", "ORDER_RECEIVED"),
         "status": "PAYMENT_PENDING", "upi_intent": gateway.get("upi_intent"),
         "checkout_url": gateway.get("checkout_url"), "qr_url": gateway.get("qr_url"),
         "expires_at": expires_at, "created_at": now}
     await db.payments.insert_one(payment)
+    # Payment state is tracked independently; never overwrite the order workflow status.
     await db.orders.update_one({"_id": order["_id"]}, {"$set": {
-        "payment_status": "PAYMENT_PENDING", "order_status": "PAYMENT_PENDING", "updated_at": now}})
-    await _add_status_history(db, oid, order.get("order_status", "CREATED"), "PAYMENT_PENDING",
-        user["id"], user["email"], "FamGateway checkout created")
+        "payment_status": "PAYMENT_PENDING", "updated_at": now}})
     await audit_log("famgateway_checkout_created", user["id"], user["email"], "order", oid,
         {"provider_order_id": provider_id})
     return {"order_id": provider_id, "amount": amount, "payable_amount": payable_amount, "upi_intent": gateway.get("upi_intent"),
@@ -352,6 +398,7 @@ async def check_famgateway_payment(oid: str, user=Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Order not found")
     if not order or (user["role"] != "admin" and order.get("customer_id") != user["id"]):
         raise HTTPException(status_code=404, detail="Order not found")
+    await _restore_legacy_payment_order_status(db, order)
     if order.get("payment_status") == "PAYMENT_VERIFIED":
         return {"status": "success", "payment_status": "PAYMENT_VERIFIED"}
     payment = await db.payments.find_one({"order_id": oid, "provider": "famgateway",
@@ -373,6 +420,8 @@ async def check_famgateway_payment(oid: str, user=Depends(get_current_user)):
             {"$set": {"status": "EXPIRED", "updated_at": now}})
         await db.orders.update_one({"_id": order["_id"], "payment_status": "PAYMENT_PENDING"},
             {"$set": {"payment_status": "UNPAID", "updated_at": now}})
+        await _restore_legacy_payment_order_status(db, order, payment)
+        # Order workflow status is intentionally unchanged when a payment session expires.
         return {"status": "expired", "payment_status": "UNPAID"}
     return {"status": "pending", "payment_status": "PAYMENT_PENDING", "checkout": {
         "order_id": payment.get("provider_order_id"), "amount": payment.get("order_amount", payment.get("amount")), "payable_amount": payment.get("amount"),
@@ -495,6 +544,11 @@ async def review_manual_payment(oid: str, data: dict, admin=Depends(require_admi
         raise HTTPException(status_code=404, detail="Order or payment not found")
     if not order or not payment:
         raise HTTPException(status_code=404, detail="Pending manual payment not found")
+    if order.get("payment_status") != "PENDING_VERIFICATION":
+        raise HTTPException(status_code=409, detail="Order is no longer awaiting offline payment review")
+    expected_amount = order.get("payable_amount", order.get("amount", 0))
+    if not _amount_matches(payment.get("amount"), expected_amount):
+        raise HTTPException(status_code=409, detail="Submitted payment amount does not match the order")
     now = datetime.now(timezone.utc).isoformat()
     if decision == "APPROVE":
         if order.get("payment_status") == "PAYMENT_VERIFIED":
@@ -682,6 +736,8 @@ async def admin_list(
             {"service_name": rx},
         ]
     items = await db.orders.find(query).sort("created_at", -1).to_list(limit)
+    for item in items:
+        await _restore_legacy_payment_order_status(db, item)
     return [_serialize(o) for o in items]
 
 

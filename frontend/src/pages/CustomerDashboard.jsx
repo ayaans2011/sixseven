@@ -414,8 +414,8 @@ function MyOrders() {
               <div className="font-serif text-xl font-bold text-[#0A1128]">₹{Number(o.amount).toLocaleString('en-IN')}</div>
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
-              <StatusBadge status={o.payment_status} />
-              <StatusBadge status={o.order_status} />
+              <span className="text-xs text-[#6B7280] self-center">Payment</span><StatusBadge status={o.payment_status} />
+              <span className="text-xs text-[#6B7280] self-center">Order</span><StatusBadge status={o.order_status} />
             </div>
             <div className="mt-3 flex justify-end border-t border-[#E5E7EB] pt-3">
               <button onClick={()=>openDetail(o.id)} className="zx-btn-outline text-sm" data-testid={`view-order-${o.order_number}`}>View order details</button>
@@ -438,8 +438,8 @@ function MyOrders() {
               <button onClick={()=>setSelected(null)} className="text-[#4B5563]">✕</button>
             </div>
             <div className="mt-3 flex gap-2 flex-wrap">
-              <StatusBadge status={selected.order_status} />
-              <span className="zx-badge zx-badge-gray">Payment: {selected.payment_status}</span>
+              <span className="text-xs text-[#6B7280] self-center">Order</span><StatusBadge status={selected.order_status} />
+              <span className="text-xs text-[#6B7280] self-center">Payment</span><StatusBadge status={selected.payment_status} />
             </div>
             <div className="mt-4 text-sm"><b>Amount:</b> ₹{Number(selected.amount).toLocaleString('en-IN')}</div>
             <div className="text-sm mt-1"><b>Requirement:</b> {selected.requirement}</div>
