@@ -861,13 +861,65 @@ function AuditLogs() {
   return (
     <div>
       <h2 className="font-serif text-2xl font-bold text-[#0A1128]">Audit Logs</h2>
+      <p className="text-sm text-[#6B7280] mt-1">Security and administrative evidence is retained for accountability.</p>
       <div className="overflow-x-auto mt-4"><table className="zx-table" data-testid="audit-table"><thead><tr><th>Timestamp</th><th>Actor</th><th>Action</th><th>Target</th></tr></thead><tbody>
         {items.map(a => (
           <tr key={a.id}><td className="text-xs">{new Date(a.timestamp).toLocaleString()}</td><td className="text-xs">{a.actor_email||"system"}</td><td>{a.action}</td><td className="text-xs">{a.target_type}/{a.target_id||"—"}</td></tr>
         ))}
+        {items.length===0 && <tr><td colSpan="4" className="text-center py-6 text-[#6B7280]">No audit entries yet.</td></tr>}
       </tbody></table></div>
     </div>
   );
+}
+
+function ProductionDataReset() {
+  const [password,setPassword]=useState("");
+  const [otp,setOtp]=useState("");
+  const [challenge,setChallenge]=useState("");
+  const [confirmation,setConfirmation]=useState("");
+  const [busy,setBusy]=useState(false);
+  const [requested,setRequested]=useState(false);
+  const [result,setResult]=useState(null);
+  const requestCode=async()=>{
+    setBusy(true);
+    try {
+      const {data}=await api.post("/admin/maintenance/data-reset/request-otp",{admin_password:password});
+      setChallenge(data.challenge); setRequested(true); toast.success("Confirmation code sent to admin email");
+    } catch(e){toast.error(formatApiErrorDetail(e.response?.data?.detail));}
+    finally{setBusy(false);}
+  };
+  const runReset=async(e)=>{
+    e.preventDefault();
+    if(!window.confirm("This will remove all customer logins and operational records from active collections after archiving them. Continue?")) return;
+    setBusy(true);
+    try {
+      const {data}=await api.post("/admin/maintenance/data-reset",{
+        admin_password:password,email_otp:otp,otp_challenge:challenge,confirmation
+      });
+      setResult(data); toast.success("Production data reset completed; archives and audit evidence preserved.");
+    } catch(e){toast.error(formatApiErrorDetail(e.response?.data?.detail));}
+    finally{setBusy(false);}
+  };
+  return <div className="max-w-2xl">
+    <h2 className="font-serif text-2xl font-bold text-[#A11B1B]">Production data reset</h2>
+    <p className="text-sm text-[#4B5563] mt-2">Permanently removes customer accounts and clears active orders, payments, enquiries, support tickets, attachments, messages and notifications after copying them into restricted archive collections. Admin accounts, website content, service catalogue, coupons and audit logs remain.</p>
+    <div className="zx-card mt-4 space-y-3">
+      <div className="text-sm font-semibold">Before proceeding</div>
+      <p className="text-sm text-[#6B7280]">The reset is irreversible from this screen. Archived payment and customer information remains in the database for reconciliation and evidence retention. A database backup should also be made in your database provider before this action.</p>
+      <label className="zx-label">Administrator password</label>
+      <input type="password" autoComplete="current-password" className="zx-input" value={password} onChange={e=>setPassword(e.target.value)} />
+      {!requested ? <button className="zx-btn-primary" disabled={busy||!password} onClick={requestCode}>{busy?"Requesting…":"Send confirmation code"}</button> : (
+        <form onSubmit={runReset} className="space-y-3">
+          <label className="zx-label">Six-digit email code</label>
+          <input inputMode="numeric" maxLength={6} className="zx-input" value={otp} onChange={e=>setOtp(e.target.value.replace(/\D/g,""))} />
+          <label className="zx-label">Type exactly: RESET ZEROAXIS PRODUCTION DATA</label>
+          <input className="zx-input" value={confirmation} onChange={e=>setConfirmation(e.target.value)} />
+          <button className="zx-btn-primary bg-[#A11B1B]" disabled={busy||otp.length!==6||confirmation!=="RESET ZEROAXIS PRODUCTION DATA"}>{busy?"Resetting…":"Permanently reset production data"}</button>
+        </form>
+      )}
+      {result && <div className="border border-[#CBD5E1] rounded-lg p-3 text-sm"><b>Reset completed</b><div>Archived customer accounts: {result.archived_customers}</div><div>Archived collections: {result.archived_collections?.join(", ")}</div><div>Audit logs preserved: Yes</div></div>}
+    </div>
+  </div>;
 }
 
 function Reports() {
@@ -986,6 +1038,7 @@ export default function AdminDashboard() {
     { to: "/admin/content", label: "Website Content", icon: Settings },
     { to: "/admin/reports", label: "Reports", icon: BarChart3 },
     { to: "/admin/audit", label: "Audit Logs", icon: ClipboardList },
+    { to: "/admin/maintenance/reset", label: "Data Reset", icon: AlertTriangle },
   ];
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-[#F8F9FA]">
@@ -1024,6 +1077,7 @@ export default function AdminDashboard() {
             <Route path="content" element={<Content />} />
             <Route path="reports" element={<Reports />} />
             <Route path="audit" element={<AuditLogs />} />
+            <Route path="maintenance/reset" element={<ProductionDataReset />} />
           </Routes>
         </div>
       </main>
