@@ -397,7 +397,7 @@ async def audit_logs(admin=Depends(require_admin), limit: int = 200):
 
 # ---------- Controlled production data reset ----------
 class ProductionResetIn(BaseModel):
-    confirmation: str = Field(min_length=32, max_length=200)
+    confirmation: str = Field(min_length=30, max_length=30)
     admin_password: str = Field(min_length=1, max_length=128)
     email_otp: str = Field(min_length=6, max_length=6)
     otp_challenge: str = Field(min_length=20, max_length=200)
