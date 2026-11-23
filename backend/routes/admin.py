@@ -486,7 +486,7 @@ async def production_data_reset(data: ProductionResetIn, admin=Depends(require_a
             ("orders", "reset_archive_orders"), ("payments", "reset_archive_payments"),
             ("enquiries", "reset_archive_enquiries"), ("support_tickets", "reset_archive_support_tickets"),
             ("order_status_history", "reset_archive_order_status_history"),
-            ("messages", "reset_archive_messages"), ("files", "reset_archive_files"),
+            ("files", "reset_archive_files"),
             ("notifications", "reset_archive_notifications"),
         ]:
             rows = await db[source].find({}).to_list(10000)
@@ -503,7 +503,7 @@ async def production_data_reset(data: ProductionResetIn, admin=Depends(require_a
 
         # Only clear source collections after all archives have completed.
         for source in ["orders", "payments", "enquiries", "support_tickets",
-                       "order_status_history", "messages", "files", "notifications"]:
+                       "order_status_history", "files", "notifications"]:
             await db[source].delete_many({})
         await db.users.delete_many({"role": "customer"})
         customer_ids = [str(u["_id"]) for u in customers]
