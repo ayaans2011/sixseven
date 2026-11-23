@@ -5,7 +5,7 @@ import secrets
 from fastapi import APIRouter, HTTPException, Depends
 from bson import ObjectId
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from database import get_db
 from security import require_admin, get_current_user, audit_log, verify_password, hash_password, get_jwt_secret
 from models import ContentIn, AdminCustomerCreateIn, AdminCustomerDeleteOtpRequestIn, AdminCustomerDeleteIn
@@ -393,6 +393,135 @@ async def audit_logs(admin=Depends(require_admin), limit: int = 200):
         "timestamp": a.get("timestamp"),
     } for a in items]
 
+
+
+# ---------- Controlled production data reset ----------
+class ProductionResetIn(BaseModel):
+    confirmation: str = Field(min_length=32, max_length=200)
+    admin_password: str = Field(min_length=1, max_length=128)
+    email_otp: str = Field(min_length=6, max_length=6)
+    otp_challenge: str = Field(min_length=20, max_length=200)
+
+
+@router.post("/admin/maintenance/data-reset/request-otp")
+async def request_production_reset_otp(data: AdminCustomerDeleteOtpRequestIn, admin=Depends(require_admin)):
+    """Issue a short-lived email OTP for the production data reset operation."""
+    db = get_db()
+    admin_doc = await db.users.find_one({"_id": ObjectId(admin["id"]), "role": "admin", "disabled": {"$ne": True}})
+    if not admin_doc or not verify_password(data.admin_password, admin_doc.get("password_hash", "")):
+        raise HTTPException(status_code=401, detail="Administrator re-authentication failed.")
+    now = datetime.now(timezone.utc)
+    recent = await db.admin_login_challenges.count_documents({
+        "user_id": admin["id"], "purpose": "production_data_reset",
+        "created_at": {"$gt": now - timedelta(minutes=15)},
+    })
+    if recent >= 2:
+        raise HTTPException(status_code=429, detail="Too many reset code requests. Try again later.")
+    await db.admin_login_challenges.update_many(
+        {"user_id": admin["id"], "purpose": "production_data_reset", "used": False},
+        {"$set": {"used": True}},
+    )
+    challenge = secrets.token_urlsafe(32)
+    otp = f"{secrets.randbelow(1_000_000):06d}"
+    await db.admin_login_challenges.insert_one({
+        "token_hash": _sensitive_otp_digest(challenge), "otp_hash": _sensitive_otp_digest(otp),
+        "user_id": admin["id"], "purpose": "production_data_reset",
+        "expires_at": now + timedelta(minutes=5), "created_at": now, "used": False, "attempts": 0,
+    })
+    sent = await email_svc.send_admin_sensitive_action_otp(
+        to_email=admin_doc["email"], name=admin_doc.get("name", ""),
+        otp=otp, action="permanent ZEROAXIS customer and operational data reset",
+    )
+    if not sent:
+        await db.admin_login_challenges.update_one(
+            {"token_hash": _sensitive_otp_digest(challenge), "used": False}, {"$set": {"used": True}},
+        )
+        raise HTTPException(status_code=503, detail="Email delivery is unavailable. No data was changed.")
+    await audit_log("production_data_reset_otp_requested", admin["id"], admin["email"], "system", "production_reset")
+    return {"challenge": challenge, "message": "A six-digit code was sent to the administrator email."}
+
+
+@router.post("/admin/maintenance/data-reset")
+async def production_data_reset(data: ProductionResetIn, admin=Depends(require_admin)):
+    """Archive customer and operational data, remove customer access, and preserve audit evidence."""
+    if data.confirmation != "RESET ZEROAXIS PRODUCTION DATA":
+        raise HTTPException(status_code=400, detail="Type the exact confirmation phrase.")
+    db = get_db()
+    admin_doc = await db.users.find_one({"_id": ObjectId(admin["id"]), "role": "admin", "disabled": {"$ne": True}})
+    if not admin_doc or not verify_password(data.admin_password, admin_doc.get("password_hash", "")):
+        raise HTTPException(status_code=401, detail="Administrator re-authentication failed.")
+    if not data.email_otp.isdigit() or len(data.email_otp) != 6:
+        raise HTTPException(status_code=400, detail="Enter the six-digit email code.")
+    now = datetime.now(timezone.utc)
+    challenge = await db.admin_login_challenges.find_one({
+        "token_hash": _sensitive_otp_digest(data.otp_challenge), "user_id": admin["id"],
+        "purpose": "production_data_reset", "used": False, "expires_at": {"$gt": now},
+    })
+    if not challenge:
+        raise HTTPException(status_code=400, detail="Reset confirmation is invalid or expired.")
+    attempts = int(challenge.get("attempts", 0))
+    if attempts >= 5:
+        await db.admin_login_challenges.update_one({"_id": challenge["_id"], "used": False}, {"$set": {"used": True}})
+        raise HTTPException(status_code=429, detail="Too many incorrect codes. Request a new code.")
+    if not hmac.compare_digest(_sensitive_otp_digest(data.email_otp), challenge.get("otp_hash", "")):
+        update = {"$inc": {"attempts": 1}}
+        if attempts >= 4:
+            update["$set"] = {"used": True}
+        await db.admin_login_challenges.update_one(
+            {"_id": challenge["_id"], "used": False, "attempts": attempts}, update)
+        raise HTTPException(status_code=401, detail="Incorrect email confirmation code.")
+    consumed = await db.admin_login_challenges.update_one(
+        {"_id": challenge["_id"], "used": False, "expires_at": {"$gt": now}},
+        {"$set": {"used": True, "verified_at": now}},
+    )
+    if consumed.modified_count != 1:
+        raise HTTPException(status_code=400, detail="Reset confirmation is invalid or expired.")
+
+    # Preserve customer and payment data in restricted archive collections rather than destroy evidence.
+    customers = await db.users.find({"role": "customer"}).to_list(10000)
+    archived_at = now.isoformat()
+    archived = []
+    try:
+        for source, archive in [
+            ("orders", "reset_archive_orders"), ("payments", "reset_archive_payments"),
+            ("enquiries", "reset_archive_enquiries"), ("support_tickets", "reset_archive_support_tickets"),
+            ("order_status_history", "reset_archive_order_status_history"),
+            ("files", "reset_archive_files"),
+            ("notifications", "reset_archive_notifications"),
+        ]:
+            rows = await db[source].find({}).to_list(10000)
+            if rows:
+                await db[archive].insert_many(
+                    [{**row, "reset_archived_at": archived_at} for row in rows], ordered=True,
+                )
+            archived.append(source)
+        if customers:
+            await db.reset_archive_customers.insert_many(
+                [{**row, "reset_archived_at": archived_at} for row in customers], ordered=True,
+            )
+            archived.append("customer_accounts")
+
+        # Only clear source collections after all archives have completed.
+        for source in ["orders", "payments", "enquiries", "support_tickets",
+                       "order_status_history", "files", "notifications"]:
+            await db[source].delete_many({})
+        await db.users.delete_many({"role": "customer"})
+        customer_ids = [str(u["_id"]) for u in customers]
+        old_emails = [u.get("email") for u in customers if u.get("email")]
+        for collection in ["password_reset_tokens", "account_activation_tokens"]:
+            await db[collection].delete_many({"user_id": {"$in": customer_ids}})
+        if old_emails:
+            await db.registration_email_otps.delete_many({"email": {"$in": old_emails}})
+        # Keep audit logs, admin users, settings, service catalogue, coupons and counters.
+        await audit_log("production_data_reset_completed", admin["id"], admin["email"], "system", "production_reset",
+                        {"archived_customers": len(customers), "archived_collections": archived,
+                         "audit_logs_preserved": True})
+    except Exception:
+        await audit_log("production_data_reset_incomplete", admin["id"], admin["email"], "system", "production_reset",
+                        {"archived_collections": archived, "reason": "Archive or cleanup step failed; inspect archives before retry."})
+        raise HTTPException(status_code=500, detail="Reset did not complete fully. Existing data was not intentionally discarded; inspect the reset archive before retrying.")
+    return {"success": True, "archived_customers": len(customers), "archived_collections": archived,
+            "audit_logs_preserved": True, "admin_accounts_preserved": True}
 
 # ---------- Bulk payment reminders ----------
 class BulkRemindersOut(BaseModel):
