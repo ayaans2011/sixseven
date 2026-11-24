@@ -218,99 +218,105 @@ async def get_order(oid: str, user=Depends(get_current_user)):
 
 
 
-# FamGateway payment integration
-FAMGATEWAY_BASE_URL = "https://famgateway.in"
-logger = logging.getLogger("zeroaxis.famgateway")
+# QRPayments integration
+QRP_DEFAULT_BASE_URL = "https://qrpayments.in/api/v1"
+logger = logging.getLogger("zeroaxis.qrpayments")
 
-async def _famgateway_request(method: str, path: str, *, params=None, payload=None):
-    api_key = os.environ.get("FAMGATEWAY_API_KEY", "").strip()
+
+def _qrp_config():
+    api_key = os.environ.get("QRP_API_KEY", "").strip()
+    base_url = os.environ.get("QRP_BASE_URL", QRP_DEFAULT_BASE_URL).strip().rstrip("/")
     if not api_key:
-        raise HTTPException(status_code=503, detail="Online payments are not configured")
+        raise HTTPException(status_code=503, detail="QRPayments is not configured")
+    if not base_url.startswith("https://"):
+        raise HTTPException(status_code=503, detail="QRPayments base URL must use HTTPS")
+    return api_key, base_url
+
+
+async def _qrp_request(method: str, path: str, *, params=None, payload=None):
+    api_key, base_url = _qrp_config()
     try:
-        async with httpx.AsyncClient(timeout=20.0, follow_redirects=False) as client:
-            response = await client.request(method, FAMGATEWAY_BASE_URL + path,
-                headers={"X-Api-Key": api_key, "Accept": "application/json"},
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
+            response = await client.request(
+                method, base_url + path,
+                headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json",
+                         "Content-Type": "application/json"},
                 params=params, json=payload)
             if 300 <= response.status_code < 400:
-                from urllib.parse import urlsplit
-                location = response.headers.get("location", "")
-                target = urlsplit(location)
-                # Log only the redirect origin and path; never log query parameters or credentials.
-                logger.error("FamGateway unexpected redirect: status=%s target=%s%s",
-                    response.status_code, target.netloc, target.path)
-                raise HTTPException(status_code=502, detail="Payment provider redirected the request unexpectedly")
-            response.raise_for_status()
-            data = response.json()
-    except httpx.HTTPStatusError as exc:
-        logger.warning("FamGateway HTTP error: %s", exc.response.status_code)
-        raise HTTPException(status_code=502, detail="Payment provider could not process the request")
+                logger.error("QRPayments returned unexpected redirect: %s", response.status_code)
+                raise HTTPException(status_code=502, detail="QRPayments redirected an API request unexpectedly")
+            try:
+                data = response.json()
+            except ValueError:
+                data = {}
+            if response.status_code >= 400 or (isinstance(data, dict) and data.get("success") is False):
+                code = (data.get("error") or {}).get("code", "provider_error") if isinstance(data, dict) else "provider_error"
+                logger.warning("QRPayments API rejected request: status=%s code=%s", response.status_code, code)
+                raise HTTPException(status_code=502, detail="QRPayments could not process the payment request")
+            if not isinstance(data, dict) or data.get("success") is not True or not isinstance(data.get("data"), dict):
+                raise HTTPException(status_code=502, detail="QRPayments returned an invalid response")
+            return data["data"]
+    except HTTPException:
+        raise
     except (httpx.HTTPError, ValueError):
-        logger.exception("FamGateway request failed")
-        raise HTTPException(status_code=502, detail="Could not contact the payment provider")
-    if isinstance(data, dict) and data.get("status") == "error":
-        raise HTTPException(status_code=502, detail="Payment provider rejected the request")
-    return data
+        logger.exception("QRPayments API request failed")
+        raise HTTPException(status_code=502, detail="Could not contact QRPayments")
 
-def _gateway_data(payload: dict) -> dict:
-    value = payload.get("data") if isinstance(payload, dict) else None
-    return value if isinstance(value, dict) else (payload if isinstance(payload, dict) else {})
 
-def _amount_matches(actual, expected) -> bool:
+def _qrp_amount_matches(actual, expected) -> bool:
     try:
         return round(float(actual), 2) == round(float(expected), 2)
     except (TypeError, ValueError):
         return False
 
-def _assert_famgateway_confirmation(payment: dict, gateway_data: dict, response_status=None):
-    """Fail closed unless the provider independently confirms a paid transaction."""
-    status = str(gateway_data.get("status") or response_status or "").strip().lower()
-    if status != "success" and gateway_data.get("is_paid") is not True:
-        raise HTTPException(status_code=409, detail="Payment provider has not confirmed a successful payment")
-    # Never substitute our own stored amount when the provider omits its amount.
-    confirmed_amount = gateway_data.get("payable_amount")
-    if confirmed_amount is None:
-        confirmed_amount = gateway_data.get("amount")
-    if confirmed_amount is None or not _amount_matches(confirmed_amount, payment.get("amount")):
-        raise HTTPException(status_code=409, detail="Provider payment amount is missing or does not match")
-    if not str(gateway_data.get("utr") or "").strip():
-        raise HTTPException(status_code=409, detail="Provider confirmation is missing the transaction UTR")
+
+def _qrp_order_reference(order: dict) -> str:
+    # Stable across retries; QRPayments safely returns the same payment for same ID + amount.
+    return "ZX-" + str(order.get("order_number") or order["_id"]).replace(" ", "")[:60]
 
 
-async def _mark_famgateway_paid(db, payment: dict, order: dict, gateway_data: dict, response_status=None):
-    if payment.get("provider") != "famgateway" or payment.get("order_id") != str(order["_id"]):
+async def _mark_qrpayments_paid(db, payment: dict, order: dict, provider_payment: dict):
+    if payment.get("provider") != "qrpayments" or payment.get("order_id") != str(order["_id"]):
         raise HTTPException(status_code=409, detail="Payment session does not match this order")
-    _assert_famgateway_confirmation(payment, gateway_data, response_status)
+    if provider_payment.get("mode") != "live" or provider_payment.get("status") != "success":
+        raise HTTPException(status_code=409, detail="QRPayments has not confirmed a live successful payment")
+    if str(provider_payment.get("order_id") or "") != payment.get("provider_order_id"):
+        raise HTTPException(status_code=409, detail="QRPayments order reference mismatch")
+    if not _qrp_amount_matches(provider_payment.get("amount"), payment.get("amount")):
+        raise HTTPException(status_code=409, detail="QRPayments payment amount mismatch")
+    provider_id = str(provider_payment.get("id") or "").strip()
+    if not provider_id:
+        raise HTTPException(status_code=409, detail="QRPayments payment ID is missing")
+    duplicate = await db.payments.find_one({
+        "provider": "qrpayments", "provider_payment_id": provider_id,
+        "order_id": {"$ne": str(order["_id"])}})
+    if duplicate:
+        raise HTTPException(status_code=409, detail="QRPayments transaction already linked to another order")
 
     now = datetime.now(timezone.utc).isoformat()
     oid = str(order["_id"])
-    utr = str(gateway_data.get("utr") or "").strip()
-    if not utr:
-        raise HTTPException(status_code=409, detail="Verified payment has no UTR")
-    duplicate = await db.payments.find_one({"provider": "famgateway", "utr": utr, "order_id": {"$ne": oid}})
-    if duplicate:
-        raise HTTPException(status_code=409, detail="Transaction reference already used")
-    restored_order_status = payment.get("previous_order_status")
-    if restored_order_status not in {"ORDER_RECEIVED", "DEVELOPER_ASSIGNED", "WORK_STARTED", "IN_PROGRESS", "READY_FOR_DELIVERY", "COMPLETED"}:
-        restored_order_status = "READY_FOR_DELIVERY" if order.get("payment_due_stage") == "AFTER_WORK" else (
+    restored = payment.get("previous_order_status")
+    if restored not in {"ORDER_RECEIVED", "DEVELOPER_ASSIGNED", "WORK_STARTED", "IN_PROGRESS", "READY_FOR_DELIVERY", "COMPLETED"}:
+        restored = "READY_FOR_DELIVERY" if order.get("payment_due_stage") == "AFTER_WORK" else (
             "DEVELOPER_ASSIGNED" if order.get("assigned_developer") else "ORDER_RECEIVED")
     order_update = {"payment_status": "PAYMENT_VERIFIED", "payment_requested": False, "updated_at": now}
     if order.get("order_status") == "PAYMENT_PENDING":
-        order_update["order_status"] = restored_order_status
+        order_update["order_status"] = restored
     changed = await db.orders.update_one(
         {"_id": order["_id"], "payment_status": {"$ne": "PAYMENT_VERIFIED"}},
         {"$set": order_update})
+    await db.payments.update_one({"_id": payment["_id"]}, {"$set": {
+        "status": "PAYMENT_VERIFIED", "provider_payment_id": provider_id,
+        "utr": provider_payment.get("utr"), "transaction_id": provider_payment.get("utr"),
+        "verified_at": now, "verified_by": "QRPayments", "updated_at": now}})
     if changed.modified_count:
         if order.get("order_status") == "PAYMENT_PENDING":
-            await _add_status_history(db, oid, "PAYMENT_PENDING", restored_order_status,
-                "system", "FamGateway", "Payment confirmed; restored order workflow status")
-        await db.payments.update_one({"_id": payment["_id"]}, {"$set": {
-            "status": "PAYMENT_VERIFIED", "utr": utr,
-            "transaction_id": gateway_data.get("transaction_id"),
-            "sender_name": gateway_data.get("sender_name"),
-            "payment_time": gateway_data.get("payment_time"),
-            "verified_at": now, "verified_by": "FamGateway"}})
+            await _add_status_history(db, oid, "PAYMENT_PENDING", restored,
+                "system", "QRPayments", "Live payment confirmed; restored order workflow status")
         if order.get("coupon_id"):
-            redeemed = await db.orders.update_one({"_id": order["_id"], "coupon_redeemed": {"$ne": True}}, {"$set": {"coupon_redeemed": True}})
+            redeemed = await db.orders.update_one(
+                {"_id": order["_id"], "coupon_redeemed": {"$ne": True}},
+                {"$set": {"coupon_redeemed": True}})
             if redeemed.modified_count:
                 await db.coupons.update_one({"_id": ObjectId(order["coupon_id"])}, {"$inc": {"used_count": 1}})
         if order.get("customer_id"):
@@ -321,10 +327,12 @@ async def _mark_famgateway_paid(db, payment: dict, order: dict, gateway_data: di
             email_svc.payment_verified(to_email=order["customer_email"],
                 name=order.get("customer_name", ""), order_number=order["order_number"],
                 amount=float(order.get("payable_amount", order.get("amount", 0))))
-        await audit_log("famgateway_payment_verified", "famgateway", "FamGateway", "order", oid, {"utr": utr})
+        await audit_log("qrpayments_payment_verified", "qrpayments", "QRPayments", "order", oid,
+            {"provider_payment_id": provider_id})
+
 
 @router.post("/{oid}/payment/create")
-async def create_famgateway_payment(oid: str, user=Depends(get_current_user)):
+async def create_qrpayments_payment(oid: str, user=Depends(get_current_user)):
     db = get_db()
     try:
         order = await db.orders.find_one({"_id": ObjectId(oid)})
@@ -341,56 +349,47 @@ async def create_famgateway_payment(oid: str, user=Depends(get_current_user)):
         raise HTTPException(status_code=409, detail="Order is not in a payable state")
     if not order.get("payment_requested"):
         raise HTTPException(status_code=403, detail="Payment has not been requested by the administrator yet")
-    amount = float(order.get("payable_amount", order.get("amount", 0)))
-    if amount <= 0:
-        raise HTTPException(status_code=400, detail="Invalid order amount")
+    amount = round(float(order.get("payable_amount", order.get("amount", 0))), 2)
+    if amount < 1 or amount > 500000:
+        raise HTTPException(status_code=400, detail="Payment amount must be between ₹1 and ₹5,00,000")
     now = datetime.now(timezone.utc).isoformat()
-    existing = await db.payments.find_one({"order_id": oid, "provider": "famgateway",
+    existing = await db.payments.find_one({"order_id": oid, "provider": "qrpayments",
         "status": "PAYMENT_PENDING", "expires_at": {"$gt": now}})
     if existing:
-        return {"order_id": existing["provider_order_id"], "amount": amount, "payable_amount": existing.get("amount", amount),
-            "upi_intent": existing.get("upi_intent"), "checkout_url": existing.get("checkout_url"),
-            "qr_url": existing.get("qr_url"), "expires_at": existing.get("expires_at")}
+        return {"order_id": existing["provider_order_id"], "amount": amount,
+            "payment_url": existing.get("payment_url"), "expires_at": existing.get("expires_at")}
+
     frontend = os.environ.get("FRONTEND_URL", "https://zeroaxis.in").rstrip("/")
-    payload = {"amount": round(amount, 2),
-        "customer_name": order.get("customer_name") or user.get("name") or "ZEROAXIS Customer",
+    provider_order_id = _qrp_order_reference(order)
+    payload = {"amount": amount, "order_id": provider_order_id,
+        "description": ("ZEROAXIS " + str(order.get("service_name") or "Order"))[:255],
+        "customer_name": (order.get("customer_name") or user.get("name") or "ZEROAXIS Customer")[:100],
         "customer_email": order.get("customer_email") or user.get("email"),
         "redirect_url": frontend + "/dashboard"}
-    webhook = os.environ.get("FAMGATEWAY_WEBHOOK_URL", "").strip()
-    if webhook:
-        payload["webhook_url"] = webhook
-    response = await _famgateway_request("POST", "/api/create-order", payload=payload)
-    gateway = _gateway_data(response)
-    provider_id = str(gateway.get("order_id") or "").strip()
-    if not provider_id or not (gateway.get("upi_intent") or gateway.get("checkout_url")):
-        raise HTTPException(status_code=502, detail="Payment provider returned incomplete checkout details")
-    if gateway.get("amount") is not None and not _amount_matches(gateway.get("amount"), amount):
-        raise HTTPException(status_code=502, detail="Payment provider returned a different base amount")
-    try:
-        payable_amount = round(float(gateway.get("payable_amount", gateway.get("amount", amount))), 2)
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=502, detail="Payment provider returned an invalid payable amount")
-    if payable_amount <= 0:
-        raise HTTPException(status_code=502, detail="Payment provider returned an invalid payable amount")
-    from datetime import timedelta
-    expires_at = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
-    payment = {"order_id": oid, "customer_id": user["id"], "provider": "famgateway",
-        "provider_order_id": provider_id, "method": "UPI", "amount": payable_amount, "order_amount": amount,
+    provider = await _qrp_request("POST", "/orders", payload=payload)
+    if not provider.get("id") or not provider.get("payment_url"):
+        raise HTTPException(status_code=502, detail="QRPayments returned incomplete checkout details")
+    if provider.get("order_id") != provider_order_id or not _qrp_amount_matches(provider.get("amount"), amount):
+        raise HTTPException(status_code=502, detail="QRPayments returned mismatched order details")
+    if provider.get("mode") != "live":
+        # Never present a staging checkout as a live customer payment.
+        raise HTTPException(status_code=503, detail="QRPayments is currently using staging mode; live payments are disabled")
+    payment = {"order_id": oid, "customer_id": user["id"], "provider": "qrpayments",
+        "provider_order_id": provider_order_id, "provider_payment_id": provider["id"],
+        "method": "UPI", "amount": amount, "order_amount": amount,
         "previous_order_status": order.get("order_status", "ORDER_RECEIVED"),
-        "status": "PAYMENT_PENDING", "upi_intent": gateway.get("upi_intent"),
-        "checkout_url": gateway.get("checkout_url"), "qr_url": gateway.get("qr_url"),
-        "expires_at": expires_at, "created_at": now}
+        "status": "PAYMENT_PENDING", "payment_url": provider["payment_url"],
+        "expires_at": provider.get("expires_at"), "created_at": now}
     await db.payments.insert_one(payment)
-    # Payment state is tracked independently; never overwrite the order workflow status.
-    await db.orders.update_one({"_id": order["_id"]}, {"$set": {
-        "payment_status": "PAYMENT_PENDING", "updated_at": now}})
-    await audit_log("famgateway_checkout_created", user["id"], user["email"], "order", oid,
-        {"provider_order_id": provider_id})
-    return {"order_id": provider_id, "amount": amount, "payable_amount": payable_amount, "upi_intent": gateway.get("upi_intent"),
-        "checkout_url": gateway.get("checkout_url"), "qr_url": gateway.get("qr_url"), "expires_at": expires_at}
+    await db.orders.update_one({"_id": order["_id"]}, {"$set": {"payment_status": "PAYMENT_PENDING", "updated_at": now}})
+    await audit_log("qrpayments_checkout_created", user["id"], user["email"], "order", oid,
+        {"provider_order_id": provider_order_id, "provider_payment_id": provider["id"]})
+    return {"order_id": provider_order_id, "amount": amount,
+        "payment_url": provider["payment_url"], "expires_at": provider.get("expires_at")}
+
 
 @router.get("/{oid}/payment/status")
-async def check_famgateway_payment(oid: str, user=Depends(get_current_user)):
+async def check_qrpayments_payment(oid: str, user=Depends(get_current_user)):
     db = get_db()
     try:
         order = await db.orders.find_one({"_id": ObjectId(oid)})
@@ -398,72 +397,68 @@ async def check_famgateway_payment(oid: str, user=Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Order not found")
     if not order or (user["role"] != "admin" and order.get("customer_id") != user["id"]):
         raise HTTPException(status_code=404, detail="Order not found")
-    await _restore_legacy_payment_order_status(db, order)
     if order.get("payment_status") == "PAYMENT_VERIFIED":
         return {"status": "success", "payment_status": "PAYMENT_VERIFIED"}
-    payment = await db.payments.find_one({"order_id": oid, "provider": "famgateway",
+    payment = await db.payments.find_one({"order_id": oid, "provider": "qrpayments",
         "status": {"$in": ["PAYMENT_PENDING", "PAYMENT_VERIFIED"]}}, sort=[("created_at", -1)])
     if not payment:
-        raise HTTPException(status_code=404, detail="No FamGateway checkout found")
-    response = await _famgateway_request("GET", "/api/verify-order.php",
-        params={"order_id": payment["provider_order_id"]})
-    gateway = _gateway_data(response)
-    status = str(gateway.get("status") or response.get("status") or "").lower()
-    if status == "success" or gateway.get("is_paid") is True:
-        if not _amount_matches(gateway.get("payable_amount", gateway.get("amount", payment["amount"])), payment["amount"]):
-            raise HTTPException(status_code=409, detail="Verified payment amount mismatch")
-        await _mark_famgateway_paid(db, payment, order, gateway, response.get("status"))
+        raise HTTPException(status_code=404, detail="No QRPayments checkout found")
+    provider = await _qrp_request("GET", "/orders/" + payment["provider_order_id"])
+    if provider.get("mode") == "live" and provider.get("status") == "success":
+        await _mark_qrpayments_paid(db, payment, order, provider)
         return {"status": "success", "payment_status": "PAYMENT_VERIFIED"}
-    if status == "expired" or gateway.get("is_expired") is True:
+    if provider.get("status") == "expired":
         now = datetime.now(timezone.utc).isoformat()
         await db.payments.update_one({"_id": payment["_id"], "status": "PAYMENT_PENDING"},
             {"$set": {"status": "EXPIRED", "updated_at": now}})
         await db.orders.update_one({"_id": order["_id"], "payment_status": "PAYMENT_PENDING"},
             {"$set": {"payment_status": "UNPAID", "updated_at": now}})
-        await _restore_legacy_payment_order_status(db, order, payment)
-        # Order workflow status is intentionally unchanged when a payment session expires.
         return {"status": "expired", "payment_status": "UNPAID"}
-    return {"status": "pending", "payment_status": "PAYMENT_PENDING", "checkout": {
-        "order_id": payment.get("provider_order_id"), "amount": payment.get("order_amount", payment.get("amount")), "payable_amount": payment.get("amount"),
-        "upi_intent": payment.get("upi_intent"), "checkout_url": payment.get("checkout_url"),
-        "qr_url": payment.get("qr_url"), "expires_at": payment.get("expires_at")}}
+    return {"status": "pending", "payment_status": "PAYMENT_PENDING",
+        "checkout": {"order_id": payment.get("provider_order_id"),
+                     "payment_url": payment.get("payment_url"), "expires_at": payment.get("expires_at")}}
 
-@router.post("/famgateway/webhook")
-async def famgateway_webhook(request: Request):
-    api_key = os.environ.get("FAMGATEWAY_API_KEY", "").strip()
-    if not api_key:
-        raise HTTPException(status_code=503, detail="Payment provider not configured")
+
+@router.post("/qrpayments/webhook")
+async def qrpayments_webhook(request: Request):
+    secret = os.environ.get("QRP_WEBHOOK_SECRET", "").strip()
+    if not secret:
+        raise HTTPException(status_code=503, detail="QRPayments webhook is not configured")
     raw = await request.body()
-    signature = request.headers.get("x-famgateway-signature", "")
-    expected = hmac.new(api_key.encode(), raw, hashlib.sha256).hexdigest()
-    if not signature or not hmac.compare_digest(expected, signature.strip()):
+    timestamp = request.headers.get("x-upi-timestamp", "").strip()
+    signature = request.headers.get("x-upi-signature", "").strip()
+    try:
+        ts = int(timestamp)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=401, detail="Invalid webhook timestamp")
+    if abs(datetime.now(timezone.utc).timestamp() - ts) > 300:
+        raise HTTPException(status_code=401, detail="Expired webhook signature")
+    expected = "sha256=" + hmac.new(secret.encode(), timestamp.encode() + b"." + raw, hashlib.sha256).hexdigest()
+    if not signature or not hmac.compare_digest(expected, signature):
         raise HTTPException(status_code=401, detail="Invalid webhook signature")
     try:
         event = await request.json()
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid webhook payload")
-    if event.get("event") != "payment.success" and str(event.get("status", "")).lower() != "success":
-        return {"status": "ignored"}
-    provider_id = str(event.get("order_id") or "").strip()
-    if not provider_id:
-        raise HTTPException(status_code=400, detail="Missing provider order ID")
+    if event.get("event") == "webhook.test":
+        return {"status": "received"}
+    if event.get("mode") != "live":
+        return {"status": "ignored", "reason": "non-live event"}
+    if event.get("event") != "payment.success":
+        # Pending, failed, expired and refund events must never mark an order paid.
+        return {"status": "received"}
+    provider = (event.get("data") or {}).get("payment") or {}
+    provider_order_id = str(provider.get("order_id") or "").strip()
+    if not provider_order_id:
+        raise HTTPException(status_code=400, detail="Missing provider order reference")
     db = get_db()
-    payment = await db.payments.find_one({"provider": "famgateway", "provider_order_id": provider_id})
+    payment = await db.payments.find_one({"provider": "qrpayments", "provider_order_id": provider_order_id})
     if not payment:
         raise HTTPException(status_code=404, detail="Payment session not found")
     order = await db.orders.find_one({"_id": ObjectId(payment["order_id"])})
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    if not _amount_matches(event.get("payable_amount", event.get("amount")), payment["amount"]):
-        raise HTTPException(status_code=409, detail="Webhook amount mismatch")
-    confirmed_response = await _famgateway_request("GET", "/api/verify-order.php",
-        params={"order_id": provider_id})
-    confirmed = _gateway_data(confirmed_response)
-    if str(confirmed.get("status") or confirmed_response.get("status") or "").lower() != "success" and confirmed.get("is_paid") is not True:
-        raise HTTPException(status_code=409, detail="Provider has not confirmed this payment")
-    if not _amount_matches(confirmed.get("payable_amount", confirmed.get("amount")), payment["amount"]):
-        raise HTTPException(status_code=409, detail="Verified payment amount mismatch")
-    await _mark_famgateway_paid(db, payment, order, confirmed, confirmed_response.get("status"))
+    await _mark_qrpayments_paid(db, payment, order, provider)
     return {"status": "received"}
 
 
