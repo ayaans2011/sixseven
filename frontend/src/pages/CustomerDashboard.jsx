@@ -350,23 +350,13 @@ function PaymentForm({ orderId, amount, onDone }) {
             </div>
           ) : (
             <div className="space-y-3">
-              {payment.upi_intent && (
+              {payment.payment_url && (
                 <div className="rounded-xl border border-[#DCE3EC] p-4">
-                  <div className="text-sm font-semibold text-[#0A1128]">Open your UPI app</div>
-                  <p className="mt-1 text-xs leading-5 text-[#6B7280]">Continue to your preferred installed UPI app. The payment amount and merchant details will be passed through the UPI link.</p>
-                  <a className="zx-btn-primary mt-3 w-full justify-center inline-flex" href={payment.upi_intent}>Choose UPI app</a>
+                  <div className="text-sm font-semibold text-[#0A1128]">Complete your payment securely</div>
+                  <p className="mt-1 text-xs leading-5 text-[#6B7280]">QRPayments will open a secure checkout where you can choose an available UPI app or another supported method.</p>
+                  <a className="zx-btn-primary mt-3 w-full justify-center inline-flex" href={payment.payment_url} target="_blank" rel="noreferrer">Open QRPayments checkout</a>
                 </div>
               )}
-              {!payment.upi_intent && payment.checkout_url && (
-                <a className="zx-btn-primary w-full justify-center inline-flex" href={payment.checkout_url} target="_blank" rel="noreferrer">Open secure payment options</a>
-              )}
-              {!payment.upi_intent && !payment.checkout_url && payment.qr_url && (
-                <div className="rounded-xl border border-[#E5E7EB] p-4 text-center">
-                  <div className="text-sm font-semibold text-[#0A1128] mb-3">Alternative QR payment</div>
-                  <img src={payment.qr_url} alt="Payment QR fallback" className="mx-auto w-40 h-40 object-contain bg-white rounded-lg border border-[#E5E7EB] p-1" />
-                </div>
-              )}
-              {payment.checkout_url && payment.upi_intent && <a className="zx-btn-outline w-full justify-center inline-flex" href={payment.checkout_url} target="_blank" rel="noreferrer">More payment methods</a>}
               <div className="rounded-xl border border-[#E5E7EB] p-3">
                 <div className="text-xs text-[#6B7280]">Payment reference</div>
                 <div className="mt-1 text-sm font-semibold text-[#0A1128] break-all">{payment.order_id}</div>
