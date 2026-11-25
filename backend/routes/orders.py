@@ -218,84 +218,78 @@ async def get_order(oid: str, user=Depends(get_current_user)):
 
 
 
-# QRPayments integration
-QRP_DEFAULT_BASE_URL = "https://qrpayments.in/api/v1"
-logger = logging.getLogger("zeroaxis.qrpayments")
+# ZapUPI integration
+ZAPUPI_API_BASE = "https://pay.zapupi.com/api"
+zapupi_logger = logging.getLogger("zeroaxis.zapupi")
 
 
-def _qrp_config():
-    api_key = os.environ.get("QRP_API_KEY", "").strip()
-    base_url = os.environ.get("QRP_BASE_URL", QRP_DEFAULT_BASE_URL).strip().rstrip("/")
-    if not api_key:
-        raise HTTPException(status_code=503, detail="QRPayments is not configured")
-    if not base_url.startswith("https://"):
-        raise HTTPException(status_code=503, detail="QRPayments base URL must use HTTPS")
-    return api_key, base_url
+def _zapupi_key():
+    key = os.environ.get("ZAPUPI_API_KEY", "").strip()
+    if not key:
+        raise HTTPException(status_code=503, detail="ZapUPI is not configured")
+    return key
 
 
-async def _qrp_request(method: str, path: str, *, params=None, payload=None):
-    api_key, base_url = _qrp_config()
+def _zapupi_data(response: dict) -> dict:
+    if not isinstance(response, dict):
+        return {}
+    nested = response.get("data")
+    return {**response, **nested} if isinstance(nested, dict) else response
+
+
+async def _zapupi_post(endpoint: str, payload: dict) -> dict:
     try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
-            response = await client.request(
-                method, base_url + path,
-                headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json",
-                         "Content-Type": "application/json"},
-                params=params, json=payload)
-            if 300 <= response.status_code < 400:
-                location = response.headers.get("location", "")
-                from urllib.parse import urlsplit
-                parsed_location = urlsplit(location)
-                safe_location = f"{parsed_location.scheme}://{parsed_location.netloc}{parsed_location.path}" if parsed_location.scheme and parsed_location.netloc else parsed_location.path
-                logger.error("QRPayments returned redirect: status=%s location=%s", response.status_code, safe_location)
-                raise HTTPException(status_code=502, detail="QRPayments redirected an API request unexpectedly")
+        async with httpx.AsyncClient(timeout=25.0, follow_redirects=False) as client:
+            response = await client.post(
+                ZAPUPI_API_BASE + endpoint,
+                json=payload,
+                headers={"Accept": "application/json", "Content-Type": "application/json"},
+            )
             try:
-                data = response.json()
+                result = response.json()
             except ValueError:
-                data = {}
-            if response.status_code >= 400 or (isinstance(data, dict) and data.get("success") is False):
-                code = (data.get("error") or {}).get("code", "provider_error") if isinstance(data, dict) else "provider_error"
-                logger.warning("QRPayments API rejected request: status=%s code=%s", response.status_code, code)
-                raise HTTPException(status_code=502, detail="QRPayments could not process the payment request")
-            if not isinstance(data, dict) or data.get("success") is not True or not isinstance(data.get("data"), dict):
-                raise HTTPException(status_code=502, detail="QRPayments returned an invalid response")
-            return data["data"]
+                result = {}
+            if response.status_code >= 400:
+                code = result.get("message") or result.get("error") or "provider_error"
+                zapupi_logger.warning("ZapUPI API rejected request: status=%s reason=%s",
+                                      response.status_code, str(code)[:120])
+                raise HTTPException(status_code=502, detail="ZapUPI could not process the payment request")
+            if not isinstance(result, dict):
+                raise HTTPException(status_code=502, detail="ZapUPI returned an invalid response")
+            return result
     except HTTPException:
         raise
-    except (httpx.HTTPError, ValueError):
-        logger.exception("QRPayments API request failed")
-        raise HTTPException(status_code=502, detail="Could not contact QRPayments")
+    except httpx.HTTPError:
+        zapupi_logger.exception("ZapUPI API request failed")
+        raise HTTPException(status_code=502, detail="Could not contact ZapUPI")
 
 
-def _qrp_amount_matches(actual, expected) -> bool:
+def _zapupi_amount_matches(actual, expected) -> bool:
     try:
         return round(float(actual), 2) == round(float(expected), 2)
     except (TypeError, ValueError):
         return False
 
 
-def _qrp_order_reference(order: dict) -> str:
-    # Stable across retries; QRPayments safely returns the same payment for same ID + amount.
-    return "ZX-" + str(order.get("order_number") or order["_id"]).replace(" ", "")[:60]
-
-
-async def _mark_qrpayments_paid(db, payment: dict, order: dict, provider_payment: dict):
-    if payment.get("provider") != "qrpayments" or payment.get("order_id") != str(order["_id"]):
-        raise HTTPException(status_code=409, detail="Payment session does not match this order")
-    if provider_payment.get("mode") != "live" or provider_payment.get("status") != "success":
-        raise HTTPException(status_code=409, detail="QRPayments has not confirmed a live successful payment")
-    if str(provider_payment.get("order_id") or "") != payment.get("provider_order_id"):
-        raise HTTPException(status_code=409, detail="QRPayments order reference mismatch")
-    if not _qrp_amount_matches(provider_payment.get("amount"), payment.get("amount")):
-        raise HTTPException(status_code=409, detail="QRPayments payment amount mismatch")
-    provider_id = str(provider_payment.get("id") or "").strip()
-    if not provider_id:
-        raise HTTPException(status_code=409, detail="QRPayments payment ID is missing")
+async def _mark_zapupi_paid(db, payment: dict, order: dict, provider_data: dict):
+    if payment.get("provider") != "zapupi" or payment.get("order_id") != str(order["_id"]):
+        raise HTTPException(status_code=409, detail="ZapUPI payment session does not match this order")
+    if str(provider_data.get("status") or "").strip().lower() != "success":
+        raise HTTPException(status_code=409, detail="ZapUPI has not confirmed a successful payment")
+    if str(provider_data.get("environment") or "").strip().lower() not in {"cashier", "zappay"}:
+        raise HTTPException(status_code=409, detail="ZapUPI test payments cannot be accepted as live payments")
+    if str(provider_data.get("order_id") or "").strip() != payment.get("provider_order_id"):
+        raise HTTPException(status_code=409, detail="ZapUPI order reference mismatch")
+    if not _zapupi_amount_matches(provider_data.get("amount"), payment.get("amount")):
+        raise HTTPException(status_code=409, detail="ZapUPI payment amount mismatch")
+    txn_id = str(provider_data.get("txn_id") or "").strip()
+    if not txn_id or txn_id.upper().startswith("DUMMY"):
+        raise HTTPException(status_code=409, detail="ZapUPI transaction ID is missing or belongs to test mode")
     duplicate = await db.payments.find_one({
-        "provider": "qrpayments", "provider_payment_id": provider_id,
+        "provider": "zapupi", "txn_id": txn_id,
         "order_id": {"$ne": str(order["_id"])}})
     if duplicate:
-        raise HTTPException(status_code=409, detail="QRPayments transaction already linked to another order")
+        raise HTTPException(status_code=409, detail="ZapUPI transaction is already linked to another order")
 
     now = datetime.now(timezone.utc).isoformat()
     oid = str(order["_id"])
@@ -310,13 +304,14 @@ async def _mark_qrpayments_paid(db, payment: dict, order: dict, provider_payment
         {"_id": order["_id"], "payment_status": {"$ne": "PAYMENT_VERIFIED"}},
         {"$set": order_update})
     await db.payments.update_one({"_id": payment["_id"]}, {"$set": {
-        "status": "PAYMENT_VERIFIED", "provider_payment_id": provider_id,
-        "utr": provider_payment.get("utr"), "transaction_id": provider_payment.get("utr"),
-        "verified_at": now, "verified_by": "QRPayments", "updated_at": now}})
+        "status": "PAYMENT_VERIFIED", "txn_id": txn_id,
+        "utr": provider_data.get("utr"), "transaction_id": provider_data.get("utr") or txn_id,
+        "environment": provider_data.get("environment"),
+        "verified_at": now, "verified_by": "ZapUPI", "updated_at": now}})
     if changed.modified_count:
         if order.get("order_status") == "PAYMENT_PENDING":
             await _add_status_history(db, oid, "PAYMENT_PENDING", restored,
-                "system", "QRPayments", "Live payment confirmed; restored order workflow status")
+                "system", "ZapUPI", "Payment confirmed by ZapUPI order-status API")
         if order.get("coupon_id"):
             redeemed = await db.orders.update_one(
                 {"_id": order["_id"], "coupon_redeemed": {"$ne": True}},
@@ -329,14 +324,28 @@ async def _mark_qrpayments_paid(db, payment: dict, order: dict, provider_payment
                 "read": False, "created_at": now})
         if order.get("customer_email"):
             email_svc.payment_verified(to_email=order["customer_email"],
-                name=order.get("customer_name", ""), order_number=order["order_number"],
+                name=order.get("customer_name", ""),
+                order_number=order["order_number"],
                 amount=float(order.get("payable_amount", order.get("amount", 0))))
-        await audit_log("qrpayments_payment_verified", "qrpayments", "QRPayments", "order", oid,
-            {"provider_payment_id": provider_id})
+        await audit_log("zapupi_payment_verified", "zapupi", "ZapUPI", "order", oid,
+            {"txn_id": txn_id})
+
+
+async def _fetch_zapupi_order_status(provider_order_id: str) -> dict:
+    response = await _zapupi_post("/order-status", {
+        "zap_key": _zapupi_key(),
+        "order_id": provider_order_id,
+    })
+    data = _zapupi_data(response)
+    # The API's outer response may use status=success while data.status is the
+    # actual payment state. Require the order details, not merely outer success.
+    if not data.get("order_id") or not data.get("status"):
+        raise HTTPException(status_code=502, detail="ZapUPI returned incomplete order-status details")
+    return data
 
 
 @router.post("/{oid}/payment/create")
-async def create_qrpayments_payment(oid: str, user=Depends(get_current_user)):
+async def create_zapupi_payment(oid: str, user=Depends(get_current_user)):
     db = get_db()
     try:
         order = await db.orders.find_one({"_id": ObjectId(oid)})
@@ -356,44 +365,58 @@ async def create_qrpayments_payment(oid: str, user=Depends(get_current_user)):
     amount = round(float(order.get("payable_amount", order.get("amount", 0))), 2)
     if amount < 1 or amount > 500000:
         raise HTTPException(status_code=400, detail="Payment amount must be between ₹1 and ₹5,00,000")
-    now = datetime.now(timezone.utc).isoformat()
-    existing = await db.payments.find_one({"order_id": oid, "provider": "qrpayments",
-        "status": "PAYMENT_PENDING", "expires_at": {"$gt": now}})
+    _zapupi_key()
+    existing = await db.payments.find_one({"order_id": oid, "provider": "zapupi",
+        "status": "PAYMENT_PENDING", "payment_url": {"$exists": True, "$ne": ""}},
+        sort=[("created_at", -1)])
     if existing:
         return {"order_id": existing["provider_order_id"], "amount": amount,
-            "payment_url": existing.get("payment_url"), "expires_at": existing.get("expires_at")}
+                "payment_url": existing["payment_url"]}
 
-    frontend = os.environ.get("FRONTEND_URL", "https://zeroaxis.in").rstrip("/")
-    provider_order_id = _qrp_order_reference(order)
-    payload = {"amount": amount, "order_id": provider_order_id,
-        "description": ("ZEROAXIS " + str(order.get("service_name") or "Order"))[:255],
-        "customer_name": (order.get("customer_name") or user.get("name") or "ZEROAXIS Customer")[:100],
-        "customer_email": order.get("customer_email") or user.get("email"),
-        "redirect_url": frontend + "/dashboard"}
-    provider = await _qrp_request("POST", "/orders", payload=payload)
-    if not provider.get("id") or not provider.get("payment_url"):
-        raise HTTPException(status_code=502, detail="QRPayments returned incomplete checkout details")
-    if provider.get("order_id") != provider_order_id or not _qrp_amount_matches(provider.get("amount"), amount):
-        raise HTTPException(status_code=502, detail="QRPayments returned mismatched order details")
-    if provider.get("mode") != "live":
-        # Never present a staging checkout as a live customer payment.
-        raise HTTPException(status_code=503, detail="QRPayments is currently using staging mode; live payments are disabled")
-    payment = {"order_id": oid, "customer_id": user["id"], "provider": "qrpayments",
-        "provider_order_id": provider_order_id, "provider_payment_id": provider["id"],
-        "method": "UPI", "amount": amount, "order_amount": amount,
-        "previous_order_status": order.get("order_status", "ORDER_RECEIVED"),
-        "status": "PAYMENT_PENDING", "payment_url": provider["payment_url"],
-        "expires_at": provider.get("expires_at"), "created_at": now}
+    provider_order_id = "ZX" + secrets.token_hex(12).upper()
+    payload = {
+        "zap_key": _zapupi_key(),
+        "order_id": provider_order_id,
+        "amount": f"{amount:.2f}",
+        "remark": (str(order.get("order_number") or oid) + " | " +
+                   str(order.get("service_name") or "ZEROAXIS order"))[:180],
+        "webhook_url": os.environ.get(
+            "ZAPUPI_WEBHOOK_URL",
+            "https://sixseven-backend-maft.onrender.com/api/orders/zapupi/webhook",
+        ).strip(),
+    }
+    mobile = str(order.get("customer_mobile") or user.get("phone") or "").strip()
+    if mobile:
+        payload["customer_mobile"] = mobile
+    response = await _zapupi_post("/create-order", payload)
+    provider = _zapupi_data(response)
+    outer_status = str(response.get("status") or "").strip().lower()
+    if outer_status not in {"success", "ok"} and not provider.get("payment_url"):
+        raise HTTPException(status_code=502, detail="ZapUPI did not create the payment order")
+    payment_url = str(provider.get("payment_url") or "").strip()
+    returned_order_id = str(provider.get("order_id") or provider_order_id).strip()
+    if not payment_url or returned_order_id != provider_order_id:
+        raise HTTPException(status_code=502, detail="ZapUPI returned incomplete or mismatched checkout details")
+    if not payment_url.startswith("https://"):
+        raise HTTPException(status_code=502, detail="ZapUPI returned an insecure payment URL")
+
+    now = datetime.now(timezone.utc).isoformat()
+    payment = {
+        "order_id": oid, "customer_id": user["id"], "provider": "zapupi",
+        "provider_order_id": provider_order_id, "method": "UPI",
+        "amount": amount, "order_amount": amount, "previous_order_status": order.get("order_status", "ORDER_RECEIVED"),
+        "status": "PAYMENT_PENDING", "payment_url": payment_url, "created_at": now,
+    }
     await db.payments.insert_one(payment)
-    await db.orders.update_one({"_id": order["_id"]}, {"$set": {"payment_status": "PAYMENT_PENDING", "updated_at": now}})
-    await audit_log("qrpayments_checkout_created", user["id"], user["email"], "order", oid,
-        {"provider_order_id": provider_order_id, "provider_payment_id": provider["id"]})
-    return {"order_id": provider_order_id, "amount": amount,
-        "payment_url": provider["payment_url"], "expires_at": provider.get("expires_at")}
+    await db.orders.update_one({"_id": order["_id"], "payment_status": {"$ne": "PAYMENT_VERIFIED"}},
+        {"$set": {"payment_status": "PAYMENT_PENDING", "updated_at": now}})
+    await audit_log("zapupi_checkout_created", user["id"], user["email"], "order", oid,
+        {"provider_order_id": provider_order_id})
+    return {"order_id": provider_order_id, "amount": amount, "payment_url": payment_url}
 
 
 @router.get("/{oid}/payment/status")
-async def check_qrpayments_payment(oid: str, user=Depends(get_current_user)):
+async def check_zapupi_payment(oid: str, user=Depends(get_current_user)):
     db = get_db()
     try:
         order = await db.orders.find_one({"_id": ObjectId(oid)})
@@ -403,67 +426,61 @@ async def check_qrpayments_payment(oid: str, user=Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="Order not found")
     if order.get("payment_status") == "PAYMENT_VERIFIED":
         return {"status": "success", "payment_status": "PAYMENT_VERIFIED"}
-    payment = await db.payments.find_one({"order_id": oid, "provider": "qrpayments",
-        "status": {"$in": ["PAYMENT_PENDING", "PAYMENT_VERIFIED"]}}, sort=[("created_at", -1)])
+    payment = await db.payments.find_one({"order_id": oid, "provider": "zapupi",
+        "status": {"$in": ["PAYMENT_PENDING", "PAYMENT_VERIFIED"]}},
+        sort=[("created_at", -1)])
     if not payment:
-        raise HTTPException(status_code=404, detail="No QRPayments checkout found")
-    provider = await _qrp_request("GET", "/orders/" + payment["provider_order_id"])
-    if provider.get("mode") == "live" and provider.get("status") == "success":
-        await _mark_qrpayments_paid(db, payment, order, provider)
+        raise HTTPException(status_code=404, detail="No ZapUPI checkout found")
+    provider = await _fetch_zapupi_order_status(payment["provider_order_id"])
+    state = str(provider.get("status") or "").strip().lower()
+    if state == "success":
+        await _mark_zapupi_paid(db, payment, order, provider)
         return {"status": "success", "payment_status": "PAYMENT_VERIFIED"}
-    if provider.get("status") == "expired":
+    if state == "failed":
         now = datetime.now(timezone.utc).isoformat()
         await db.payments.update_one({"_id": payment["_id"], "status": "PAYMENT_PENDING"},
-            {"$set": {"status": "EXPIRED", "updated_at": now}})
+            {"$set": {"status": "PAYMENT_REJECTED", "updated_at": now}})
         await db.orders.update_one({"_id": order["_id"], "payment_status": "PAYMENT_PENDING"},
             {"$set": {"payment_status": "UNPAID", "updated_at": now}})
-        return {"status": "expired", "payment_status": "UNPAID"}
+        return {"status": "failed", "payment_status": "UNPAID"}
     return {"status": "pending", "payment_status": "PAYMENT_PENDING",
         "checkout": {"order_id": payment.get("provider_order_id"),
-                     "payment_url": payment.get("payment_url"), "expires_at": payment.get("expires_at")}}
+                     "payment_url": payment.get("payment_url")}}
 
 
-@router.post("/qrpayments/webhook")
-async def qrpayments_webhook(request: Request):
-    secret = os.environ.get("QRP_WEBHOOK_SECRET", "").strip()
-    if not secret:
-        raise HTTPException(status_code=503, detail="QRPayments webhook is not configured")
-    raw = await request.body()
-    timestamp = request.headers.get("x-upi-timestamp", "").strip()
-    signature = request.headers.get("x-upi-signature", "").strip()
-    try:
-        ts = int(timestamp)
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=401, detail="Invalid webhook timestamp")
-    if abs(datetime.now(timezone.utc).timestamp() - ts) > 300:
-        raise HTTPException(status_code=401, detail="Expired webhook signature")
-    expected = "sha256=" + hmac.new(secret.encode(), timestamp.encode() + b"." + raw, hashlib.sha256).hexdigest()
-    if not signature or not hmac.compare_digest(expected, signature):
-        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+@router.post("/zapupi/webhook")
+async def zapupi_webhook(request: Request):
+    # ZapUPI's supplied guide does not document webhook signatures. Therefore
+    # never trust this POST's status/amount alone: verify against its status API.
     try:
         event = await request.json()
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid webhook payload")
-    if event.get("event") == "webhook.test":
-        return {"status": "received"}
-    if event.get("mode") != "live":
-        return {"status": "ignored", "reason": "non-live event"}
-    if event.get("event") != "payment.success":
-        # Pending, failed, expired and refund events must never mark an order paid.
-        return {"status": "received"}
-    provider = (event.get("data") or {}).get("payment") or {}
-    provider_order_id = str(provider.get("order_id") or "").strip()
-    if not provider_order_id:
-        raise HTTPException(status_code=400, detail="Missing provider order reference")
-    db = get_db()
-    payment = await db.payments.find_one({"provider": "qrpayments", "provider_order_id": provider_order_id})
-    if not payment:
-        raise HTTPException(status_code=404, detail="Payment session not found")
-    order = await db.orders.find_one({"_id": ObjectId(payment["order_id"])})
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
-    await _mark_qrpayments_paid(db, payment, order, provider)
-    return {"status": "received"}
+        if not isinstance(event, dict):
+            return {"status": "ok"}
+        provider_order_id = str(event.get("order_id") or "").strip()
+        if not provider_order_id:
+            return {"status": "ok"}
+        db = get_db()
+        payment = await db.payments.find_one({
+            "provider": "zapupi", "provider_order_id": provider_order_id})
+        if not payment:
+            zapupi_logger.warning("Ignoring webhook for unknown ZapUPI order")
+            return {"status": "ok"}
+        order = await db.orders.find_one({"_id": ObjectId(payment["order_id"])})
+        if not order:
+            return {"status": "ok"}
+        provider = await _fetch_zapupi_order_status(provider_order_id)
+        state = str(provider.get("status") or "").strip().lower()
+        if state == "success":
+            await _mark_zapupi_paid(db, payment, order, provider)
+        elif state == "failed":
+            now = datetime.now(timezone.utc).isoformat()
+            await db.payments.update_one({"_id": payment["_id"], "status": "PAYMENT_PENDING"},
+                {"$set": {"status": "PAYMENT_REJECTED", "updated_at": now}})
+            await db.orders.update_one({"_id": order["_id"], "payment_status": "PAYMENT_PENDING"},
+                {"$set": {"payment_status": "UNPAID", "updated_at": now}})
+    except Exception:
+        zapupi_logger.exception("ZapUPI webhook could not be processed; payment remains unverified")
+    return {"status": "ok"}
 
 
 @router.post("/{oid}/payment/manual-submit")
