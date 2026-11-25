@@ -353,8 +353,8 @@ function PaymentForm({ orderId, amount, onDone }) {
               {payment.payment_url && (
                 <div className="rounded-xl border border-[#DCE3EC] p-4">
                   <div className="text-sm font-semibold text-[#0A1128]">Complete your payment securely</div>
-                  <p className="mt-1 text-xs leading-5 text-[#6B7280]">QRPayments will open a secure checkout where you can choose an available UPI app or another supported method.</p>
-                  <a className="zx-btn-primary mt-3 w-full justify-center inline-flex" href={payment.payment_url} target="_blank" rel="noreferrer">Open QRPayments checkout</a>
+                  <p className="mt-1 text-xs leading-5 text-[#6B7280]">ZapUPI will open a secure hosted checkout. Payment is confirmed by the server.</p>
+                  <a className="zx-btn-primary mt-3 w-full justify-center inline-flex" href={payment.payment_url}>Open ZapUPI checkout</a>
                 </div>
               )}
               <div className="rounded-xl border border-[#E5E7EB] p-3">
