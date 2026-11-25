@@ -243,7 +243,11 @@ async def _qrp_request(method: str, path: str, *, params=None, payload=None):
                          "Content-Type": "application/json"},
                 params=params, json=payload)
             if 300 <= response.status_code < 400:
-                logger.error("QRPayments returned unexpected redirect: %s", response.status_code)
+                location = response.headers.get("location", "")
+                from urllib.parse import urlsplit
+                parsed_location = urlsplit(location)
+                safe_location = f"{parsed_location.scheme}://{parsed_location.netloc}{parsed_location.path}" if parsed_location.scheme and parsed_location.netloc else parsed_location.path
+                logger.error("QRPayments returned redirect: status=%s location=%s", response.status_code, safe_location)
                 raise HTTPException(status_code=502, detail="QRPayments redirected an API request unexpectedly")
             try:
                 data = response.json()
